@@ -1,5 +1,5 @@
 {
-  "//": "Walrus Sites resource + routing config. SPA-style fallbacks map dynamic id paths to the prebuilt route shell, which then reads the real id from the URL client-side. Copy this into out/ before site-builder publish.",
+  "site_name": "WalrusForge",
   "routes": {
     "/repo/*": "/repo/__id__/index.html",
     "/pr/*": "/pr/__id__/index.html",

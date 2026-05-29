@@ -21,6 +21,14 @@ Walrus blob and a real on-chain object, not a screenshot.
 | Package | `0x654fe8dd914bc440af0576e0d28d48e0c883ec9616f311f92571ec44dad71a8d` |
 | ForgeRegistry (shared) | `0x4e4bc674d6c77acb27dfa07ab255d04eb6b31d34009f8ccd2309766f8286bb3b` |
 | Walrus | public testnet publisher / aggregator (HTTP) |
+| Web (Walrus Site, testnet) | site object `0x38d99f627aff840d309628f1b1478d4533654fab7117ed030a3dccb5125d2b97` · subdomain `1f0c5k3c47udwnlh4a978yhmzqyt0drtnbgcdoo95ag27jgb6f` |
+
+> The UI is a static SPA published **on Walrus Sites** (the whole stack — code,
+> data, and the site itself — lives on Sui + Walrus). It reads live testnet data
+> directly from a Sui fullnode RPC + the Walrus aggregator, with **no backend**.
+> Note: the public `wal.app` portal serves mainnet sites only; to browse the
+> testnet deployment, self-host a portal at the subdomain above, or run it
+> locally with `npx serve web/out`.
 
 A full demo repo (`counter-demo-v2`) has already been created, gone through an
 agent-opened PR, a CI-agent review, an owner merge, and a published release
