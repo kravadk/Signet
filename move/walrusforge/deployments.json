@@ -1,0 +1,10 @@
+{
+  "testnet": {
+    "chainId": "4c78adac",
+    "packageId": "0x654fe8dd914bc440af0576e0d28d48e0c883ec9616f311f92571ec44dad71a8d",
+    "forgeRegistry": "0x4e4bc674d6c77acb27dfa07ab255d04eb6b31d34009f8ccd2309766f8286bb3b",
+    "upgradeCap": "0x6f132fdf4f01214a7593a2286b61ec41811ec60b5eefcddb1fa239486457f9fb",
+    "publishTx": "25ZSRDtJpQHNt2RbwiWFcsUx1cH2FVUvATVmhB6CxjNu",
+    "toolchainVersion": "1.73.0"
+  }
+}

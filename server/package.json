@@ -1,0 +1,22 @@
+{
+  "name": "walrusforge-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WalrusForge indexer + REST API (Sui events -> SQLite -> HTTP)",
+  "scripts": {
+    "dev": "node --experimental-sqlite --import tsx watch src/index.ts",
+    "start": "node --experimental-sqlite --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.30.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

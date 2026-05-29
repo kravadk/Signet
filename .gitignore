@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+**/build/
+**/.next/
+**/dist/
+
+# Move build
+move/walrusforge/build/
+
+# Indexer database (rebuildable from chain)
+server/*.db
+server/*.db-*
+
+# Local CLI state + demo scratch
+**/.forge/
+demo/sample-repo/
+
+# Secrets — never commit keys
+*.key
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.log
