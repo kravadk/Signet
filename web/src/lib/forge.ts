@@ -281,6 +281,17 @@ export async function fetchManifest(blobId: string): Promise<Manifest | null> {
   }
 }
 
+/**
+ * Read the last path segment from the browser URL. Used by dynamic pages under
+ * static export, where the prebuilt route param is a placeholder ("__id__") but
+ * the real id lives in the actual URL the user navigated to.
+ */
+export function routeTailFromLocation(): string {
+  if (typeof window === "undefined") return "";
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  return parts.length ? decodeURIComponent(parts[parts.length - 1]) : "";
+}
+
 export function short(id: string, head = 6, tail = 4): string {
   if (!id) return "";
   if (id.length <= head + tail + 2) return id;
