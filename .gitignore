@@ -6,6 +6,8 @@ node_modules/
 **/build/
 **/.next/
 **/dist/
+**/out/
+*.tsbuildinfo
 
 # Move build
 move/walrusforge/build/
