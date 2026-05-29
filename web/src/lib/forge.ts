@@ -155,6 +155,110 @@ export async function getRelease(id: string): Promise<Release | null> {
   };
 }
 
+// ===== Issues / bounties / reputation / activity (event-scanned, no backend) =====
+
+export interface Issue {
+  id: string; repoId: string; author: string; title: string;
+  bodyBlob: string; status: number; commentCount: number;
+}
+export interface Bounty {
+  id: string; repoId: string; funder: string; title: string;
+  amount: number; status: number; claimant: string | null;
+}
+
+export async function getIssue(id: string): Promise<Issue | null> {
+  const obj = await suiClient.getObject({ id, options: { showContent: true } });
+  const x = (obj.data?.content as any)?.fields ?? {};
+  if (!x.title && !x.repo_id) return null;
+  return {
+    id, repoId: x.repo_id, author: x.author, title: x.title,
+    bodyBlob: x.body_blob, status: Number(x.status), commentCount: Number(x.comment_count),
+  };
+}
+
+export async function listIssues(repoId: string, limit = 50): Promise<Issue[]> {
+  const ev = await suiClient.queryEvents({
+    query: { MoveEventType: `${DEPLOYMENT.packageId}::issue::IssueOpened` },
+    limit, order: "descending",
+  });
+  const ids = ev.data.filter((e) => (e.parsedJson as any)?.repo_id === repoId)
+    .map((e) => (e.parsedJson as any)?.issue_id).filter(Boolean) as string[];
+  const rows = await Promise.all(ids.map((i) => getIssue(i).catch(() => null)));
+  return rows.filter((r): r is Issue => r !== null);
+}
+
+export async function getBounty(id: string): Promise<Bounty | null> {
+  const obj = await suiClient.getObject({ id, options: { showContent: true } });
+  const x = (obj.data?.content as any)?.fields ?? {};
+  if (x.amount === undefined) return null;
+  const claimant = x.claimant?.fields?.vec?.[0] ?? x.claimant ?? null;
+  return {
+    id, repoId: x.repo_id, funder: x.funder, title: x.title,
+    amount: Number(x.amount), status: Number(x.status),
+    claimant: typeof claimant === "string" ? claimant : null,
+  };
+}
+
+export async function listBounties(repoId: string, limit = 50): Promise<Bounty[]> {
+  const ev = await suiClient.queryEvents({
+    query: { MoveEventType: `${DEPLOYMENT.packageId}::bounty::BountyPosted` },
+    limit, order: "descending",
+  });
+  const ids = ev.data.filter((e) => (e.parsedJson as any)?.repo_id === repoId)
+    .map((e) => (e.parsedJson as any)?.bounty_id).filter(Boolean) as string[];
+  const rows = await Promise.all(ids.map((i) => getBounty(i).catch(() => null)));
+  return rows.filter((r): r is Bounty => r !== null);
+}
+
+export async function listReleases(repoId: string, limit = 50): Promise<Release[]> {
+  const ev = await suiClient.queryEvents({
+    query: { MoveEventType: `${DEPLOYMENT.packageId}::release::ReleasePublished` },
+    limit, order: "descending",
+  });
+  const ids = ev.data.filter((e) => (e.parsedJson as any)?.repo_id === repoId)
+    .map((e) => (e.parsedJson as any)?.release_id).filter(Boolean) as string[];
+  const rows = await Promise.all(ids.map((i) => getRelease(i).catch(() => null)));
+  return rows.filter((r): r is Release => r !== null);
+}
+
+export interface Reputation { agent: string; prsOpened: number; prsMerged: number; reviews: number; ciRuns: number; }
+
+export async function listReputation(repoId: string, limit = 200): Promise<Reputation[]> {
+  const ev = await suiClient.queryEvents({
+    query: { MoveEventType: `${DEPLOYMENT.packageId}::reputation::ReputationUpdated` },
+    limit, order: "descending",
+  });
+  const seen = new Map<string, Reputation>();
+  for (const e of ev.data) {
+    const p = e.parsedJson as any;
+    if (p?.repo_id !== repoId || seen.has(p.agent)) continue; // newest wins (desc order)
+    seen.set(p.agent, {
+      agent: p.agent, prsOpened: Number(p.prs_opened), prsMerged: Number(p.prs_merged),
+      reviews: Number(p.reviews), ciRuns: Number(p.ci_runs),
+    });
+  }
+  return [...seen.values()].sort((a, b) => b.prsMerged - a.prsMerged);
+}
+
+export interface Activity { tx: string; seq: string; type: string; }
+
+export async function listActivity(repoId: string, limit = 100): Promise<Activity[]> {
+  const mods = ["forge", "pull_request", "issue", "bounty", "release", "reputation"];
+  const all: Activity[] = [];
+  for (const m of mods) {
+    const ev = await suiClient.queryEvents({
+      query: { MoveModule: { package: DEPLOYMENT.packageId, module: m } },
+      limit, order: "descending",
+    });
+    for (const e of ev.data) {
+      const p = e.parsedJson as any;
+      if (p?.repo_id && p.repo_id !== repoId) continue;
+      all.push({ tx: e.id.txDigest, seq: String(e.id.eventSeq), type: e.type.split("::").slice(-1)[0] });
+    }
+  }
+  return all.slice(0, limit);
+}
+
 // ===== Walrus reads =====
 
 export async function fetchBlobText(blobId: string): Promise<string | null> {
