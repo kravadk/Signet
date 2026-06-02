@@ -136,13 +136,13 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .brand .logo {
   width: 46px; height: 46px;
   border-radius: 13px;
-  background: linear-gradient(160deg, #2a6df0, #0c2a5e);
+  background: radial-gradient(120% 120% at 50% 0%, #11161f, #0a0d14);
   border: 1px solid var(--bd-strong);
   display: grid; place-items: center;
   flex: none;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10);
 }
-.brand .logo svg { width: 26px; height: 26px; stroke: #fff; }
+.brand .logo svg, .brand .logo img { width: 34px; height: 34px; display: block; }
 .brand .name { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
 .brand .collapse {
   margin-left: auto;
