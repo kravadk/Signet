@@ -27,12 +27,24 @@ export interface Deployment {
   packageId: string;
   forgeRegistry: string;
   upgradeCap: string;
+  /** Upgraded package that contains the `playground` module (optional). */
+  playgroundPackageId?: string;
+  /** Shared StarRegistry object for the playground module (optional). */
+  starRegistry?: string;
+  /** Shared BuilderBoard object for the playground module (optional). */
+  builderBoard?: string;
 }
 
 export function loadDeployment(network = "testnet"): Deployment {
   const all = JSON.parse(readFileSync(DEPLOYMENTS_PATH, "utf8"));
   const d = all[network];
   if (!d) throw new Error(`No deployment for network ${network} in ${DEPLOYMENTS_PATH}`);
+  if (!d.packageId) {
+    throw new Error(
+      `Deployment for ${network} is not published yet (empty packageId). ` +
+        `Publish the package on ${network} and fill move/walrusforge/deployments.json.`,
+    );
+  }
   return d;
 }
 
@@ -312,22 +324,54 @@ export async function commentIssue(
 /** Post a bounty: split `amountMist` off gas into a fresh coin, then escrow it. */
 export async function postBounty(
   ctx: ForgeContext,
-  args: { repoId: string; title: string; amountMist: number },
+  args: { repoId: string; title: string; amountMist: number; minScore?: number },
 ) {
   const tx = new Transaction();
   const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.amountMist)]);
   tx.moveCall({
     target: `${ctx.deployment.packageId}::bounty::post_bounty`,
-    arguments: [tx.object(args.repoId), tx.pure.string(args.title), payment],
+    arguments: [
+      tx.object(args.repoId),
+      tx.pure.string(args.title),
+      payment,
+      tx.pure.u64(args.minScore ?? 0),
+    ],
   });
   return sign(ctx, tx);
 }
 
-export async function claimBounty(ctx: ForgeContext, args: { bountyId: string }) {
+export async function claimBounty(ctx: ForgeContext, args: { bountyId: string; reputationId: string }) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${ctx.deployment.packageId}::bounty::claim_bounty`,
-    arguments: [tx.object(args.bountyId)],
+    arguments: [tx.object(args.bountyId), tx.object(args.reputationId)],
+  });
+  return sign(ctx, tx);
+}
+
+/** Vouch for another agent (raises their reputation score). Permissionless,
+ *  gated on-chain by the voucher's own score. */
+export async function vouch(
+  ctx: ForgeContext,
+  args: { reputationId: string; subject: string },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${ctx.deployment.packageId}::reputation::vouch`,
+    arguments: [tx.object(args.reputationId), tx.pure.address(args.subject)],
+  });
+  return sign(ctx, tx);
+}
+
+/** Owner sets the minimum APPROVE reviews required before a PR can merge. */
+export async function setMinApprovals(
+  ctx: ForgeContext,
+  args: { repoId: string; ownerCapId: string; n: number },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${ctx.deployment.packageId}::forge::set_min_approvals`,
+    arguments: [tx.object(args.repoId), tx.object(args.ownerCapId), tx.pure.u8(args.n)],
   });
   return sign(ctx, tx);
 }
@@ -341,6 +385,45 @@ export async function submitBounty(
     target: `${ctx.deployment.packageId}::bounty::submit_bounty`,
     arguments: [tx.object(args.bountyId), tx.pure.string(args.proof)],
   });
+  return sign(ctx, tx);
+}
+
+/** Publish a Playground app on-chain (agents/CLI parity with the web).
+   Requires the upgraded package id (deployment.playgroundPackageId). */
+export async function publishApp(
+  ctx: ForgeContext,
+  args: {
+    name: string; prompt: string; manifestBlob: string; archiveBlob: string;
+    treeHash: string; category: string; parent?: string | null;
+  },
+) {
+  const pkg = ctx.deployment.playgroundPackageId;
+  if (!pkg) throw new Error("playgroundPackageId not set in deployment");
+  const builderBoard = ctx.deployment.builderBoard;
+  if (!builderBoard) throw new Error("builderBoard not set in deployment");
+  const tx = new Transaction();
+  const head = [
+    tx.pure.string(args.name),
+    tx.pure.string(args.prompt.slice(0, 300)),
+    tx.pure.string(args.manifestBlob),
+    tx.pure.string(args.archiveBlob),
+    tx.pure.string(args.treeHash),
+    tx.pure.string(args.category),
+  ];
+  if (args.parent) {
+    // Remix: pass the parent app by reference so the contract credits the parent
+    // builder's on-chain reputation (remixes_received) and records lineage.
+    tx.moveCall({
+      target: `${pkg}::playground::publish_remix_v3`,
+      arguments: [...head, tx.object(args.parent), tx.object(builderBoard), tx.object("0x6")],
+    });
+  } else {
+    const parentNone = tx.moveCall({ target: "0x1::option::none", typeArguments: ["0x2::object::ID"], arguments: [] });
+    tx.moveCall({
+      target: `${pkg}::playground::publish_app_v2`,
+      arguments: [...head, parentNone, tx.object(builderBoard), tx.object("0x6")],
+    });
+  }
   return sign(ctx, tx);
 }
 

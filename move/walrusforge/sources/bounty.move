@@ -13,6 +13,7 @@ use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::event;
 use walrusforge::forge::Repository;
+use walrusforge::reputation::{Self, RepoReputation};
 
 // ===== Errors =====
 
@@ -22,6 +23,7 @@ const ENotClaimed: u64 = 2;
 const ENotClaimant: u64 = 3;
 const EAlreadyClaimed: u64 = 4;
 const EZeroAmount: u64 = 5;
+const EScoreTooLow: u64 = 6;
 
 // ===== Status =====
 
@@ -52,6 +54,8 @@ public struct Bounty has key {
     claimant: Option<address>,
     /// Walrus blob id / PR id of the submitted proof, once delivered.
     proof: Option<String>,
+    /// Minimum reputation score required to claim (0 = open to anyone).
+    min_score: u64,
 }
 
 // ===== Events =====
@@ -62,6 +66,7 @@ public struct BountyPosted has copy, drop {
     funder: address,
     amount: u64,
     title: String,
+    min_score: u64,
 }
 public struct BountyClaimed has copy, drop { bounty_id: ID, claimant: address }
 public struct BountySubmitted has copy, drop { bounty_id: ID, proof: String }
@@ -80,6 +85,7 @@ public fun post_bounty(
     repo: &Repository,
     title: String,
     payment: Coin<SUI>,
+    min_score: u64,
     ctx: &mut TxContext,
 ) {
     let amount = coin::value(&payment);
@@ -94,6 +100,7 @@ public fun post_bounty(
         status: STATUS_OPEN,
         claimant: option::none(),
         proof: option::none(),
+        min_score,
     };
     event::emit(BountyPosted {
         bounty_id: object::id(&bounty),
@@ -101,14 +108,21 @@ public fun post_bounty(
         funder: bounty.funder,
         amount,
         title: bounty.title,
+        min_score,
     });
     transfer::share_object(bounty);
 }
 
-/// Claim an open bounty. The claimant commits to delivering the work.
-public fun claim_bounty(bounty: &mut Bounty, ctx: &TxContext) {
+/// Claim an open bounty. The claimant commits to delivering the work. If the
+/// bounty sets a `min_score`, the claimant's reputation in that repo must meet it
+/// — the `rep` ledger must be the one belonging to the bounty's repo.
+public fun claim_bounty(bounty: &mut Bounty, rep: &RepoReputation, ctx: &TxContext) {
     assert!(bounty.status == STATUS_OPEN, ENotOpen);
     assert!(option::is_none(&bounty.claimant), EAlreadyClaimed);
+    if (bounty.min_score > 0) {
+        assert!(reputation::ledger_repo(rep) == bounty.repo_id, EScoreTooLow);
+        assert!(reputation::score_of(rep, ctx.sender()) >= bounty.min_score, EScoreTooLow);
+    };
     bounty.claimant = option::some(ctx.sender());
     bounty.status = STATUS_CLAIMED;
     event::emit(BountyClaimed { bounty_id: object::id(bounty), claimant: ctx.sender() });
@@ -171,4 +185,5 @@ public fun bounty_escrow_value(b: &Bounty): u64 { balance::value(&b.escrow) }
 public fun bounty_status(b: &Bounty): u8 { b.status }
 public fun bounty_claimant(b: &Bounty): Option<address> { b.claimant }
 public fun bounty_proof(b: &Bounty): Option<String> { b.proof }
+public fun bounty_min_score(b: &Bounty): u64 { b.min_score }
 public fun fee_bps(): u64 { FEE_BPS }

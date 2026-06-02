@@ -17,6 +17,7 @@ import {
   repoList,
   repoReadManifest,
   releaseRead,
+  verifyRelease,
   prCreate,
   reviewSubmit,
   artifactUpload,
@@ -27,6 +28,8 @@ import {
   bountyClaim,
   bountySubmit,
   agentReputation,
+  agentVouch,
+  publishPlaygroundApp,
 } from "../lib/actions.js";
 import { requireAgentKey } from "./keypair.js";
 
@@ -115,6 +118,23 @@ server.registerTool(
   async ({ releaseId }) => {
     try {
       return ok(await releaseRead({ releaseId }));
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "release_verify",
+  {
+    title: "Verify release provenance",
+    description:
+      "Independently verify a release's provenance chain: that source/artifact/report blobs exist on Walrus, the source manifest's treeHash recomputes, and a merged, reviewed PR's head matches the released source. Returns a pass/fail with per-step results and a SLSA-style level. Read-only; no key needed.",
+    inputSchema: { releaseId: z.string().describe("Release object id (0x...)") },
+  },
+  async ({ releaseId }) => {
+    try {
+      return ok(await verifyRelease(releaseId));
     } catch (e) {
       return fail(e);
     }
@@ -242,11 +262,11 @@ server.registerTool(
   "bounty_claim",
   {
     title: "Claim a bounty",
-    description: "Claim an open bounty as the agent, committing to deliver the work.",
-    inputSchema: { bountyId: z.string() },
+    description: "Claim an open bounty as the agent, committing to deliver the work. Reputation-locked bounties require the agent to meet the repo's min score.",
+    inputSchema: { bountyId: z.string(), repoId: z.string().describe("Repository the bounty belongs to") },
   },
-  async ({ bountyId }) => {
-    try { return ok(await bountyClaim({ ctx: agentCtx(), bountyId })); } catch (e) { return fail(e); }
+  async ({ bountyId, repoId }) => {
+    try { return ok(await bountyClaim({ ctx: agentCtx(), bountyId, repoId })); } catch (e) { return fail(e); }
   },
 );
 
@@ -268,11 +288,44 @@ server.registerTool(
   "agent_reputation",
   {
     title: "Read agent reputation",
-    description: "Read an agent's on-chain reputation in a repo (PRs opened/merged, reviews, CI runs).",
+    description: "Read an agent's on-chain reputation in a repo: PRs opened/merged, reviews, CI runs, vouches, and the aggregate trust score.",
     inputSchema: { repoId: z.string(), agent: z.string().describe("agent Sui address") },
   },
   async ({ repoId, agent }) => {
     try { return ok(await agentReputation({ repoId, agent })); } catch (e) { return fail(e); }
+  },
+);
+
+server.registerTool(
+  "agent_vouch",
+  {
+    title: "Vouch for an agent",
+    description: "Vouch for another agent in a repo, raising their trust score. Permissionless but gated on-chain: the voucher must already have a score ≥ 10, cannot vouch for self, and cannot vouch for the same agent twice.",
+    inputSchema: { repoId: z.string(), subject: z.string().describe("the agent being vouched for (Sui address)") },
+  },
+  async ({ repoId, subject }) => {
+    try { return ok(await agentVouch({ ctx: agentCtx(), repoId, subject })); } catch (e) { return fail(e); }
+  },
+);
+
+server.registerTool(
+  "app_publish",
+  {
+    title: "Publish a Playground app",
+    description: "Publish a self-contained web app to the WalrusForge Playground gallery. Files are stored on Walrus and anchored on-chain (PublishedApp) with verifiable provenance. Pass `parent` to record a remix lineage. Requires a signer (FORGE_AGENT_KEY).",
+    inputSchema: {
+      name: z.string().describe("kebab-case app name"),
+      prompt: z.string().describe("the prompt/description that produced the app"),
+      category: z.string().optional().describe("game | tool | art | data | social | other"),
+      files: z.array(z.object({ path: z.string(), content: z.string() }))
+        .describe("app files; must include an index.html that is a complete self-contained document"),
+      parent: z.string().optional().describe("app id this is a remix of (optional)"),
+    },
+  },
+  async ({ name, prompt, category, files, parent }) => {
+    try {
+      return ok(await publishPlaygroundApp({ ctx: agentCtx(), name, prompt, category, files, parent: parent ?? null }));
+    } catch (e) { return fail(e); }
   },
 );
 

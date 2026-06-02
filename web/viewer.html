@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WalrusForge — App Viewer</title>
+  <style>
+    :root { --blue:#4da2ff; --bg:#060606; --bar:#0c1622; --bd:#1d3a52; --tx:#cfe6ff; --green:#46d18a; }
+    html,body { margin:0; height:100%; background:var(--bg); color:var(--tx);
+      font-family:'JetBrains Mono',ui-monospace,monospace; }
+    #bar { position:fixed; top:0; left:0; right:0; height:46px; z-index:5; display:flex;
+      align-items:center; gap:12px; padding:0 14px; background:#0c1622cc; backdrop-filter:blur(8px);
+      border-bottom:1px solid var(--bd); font-size:13px; }
+    #bar b { color:var(--blue); }
+    #bar .sp { flex:1; }
+    #bar a { color:var(--tx); text-decoration:none; }
+    .prov { font-size:11.5px; color:var(--green); border:1px solid rgba(70,209,138,.35);
+      background:rgba(70,209,138,.08); border-radius:999px; padding:3px 10px; }
+    .prov.fail { color:#f15b4c; border-color:rgba(241,91,76,.4); background:rgba(241,91,76,.08); }
+    #frame { position:fixed; inset:46px 0 0 0; width:100%; height:calc(100% - 46px); border:0; background:#fff; }
+    #msg { position:fixed; inset:46px 0 0 0; display:grid; place-items:center; color:#6b6b6e; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <b id="appName">WalrusForge app</b>
+    <span class="prov" id="prov">verifying…</span>
+    <span class="sp"></span>
+    <span id="by"></span>
+    <a id="chain" target="_blank" rel="noreferrer" title="on-chain record">on-chain ↗</a>
+    <a href="./index.html#playground" title="back to Playground">← Playground</a>
+  </div>
+  <div id="msg">Loading app…</div>
+  <iframe id="frame" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer" style="display:none"></iframe>
+
+  <script type="module">
+    import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.18.0/client';
+
+    const params = new URLSearchParams(location.search);
+    const appId = params.get('app');
+    const net = params.get('net') === 'mainnet' ? 'mainnet' : 'testnet';
+    const AGG = net === 'mainnet'
+      ? 'https://aggregator.walrus-mainnet.walrus.space'
+      : 'https://aggregator.walrus-testnet.walrus.space';
+    const sui = new SuiClient({ url: getFullnodeUrl(net) });
+    const $ = (id) => document.getElementById(id);
+    const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
+
+    async function sha256Hex(bytes) {
+      const buf = await crypto.subtle.digest('SHA-256', bytes);
+      return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function inflateArchive(blobId) {
+      const res = await fetch(`${AGG}/v1/blobs/${blobId}`);
+      if (!res.ok) throw new Error('archive unavailable');
+      const gz = new Uint8Array(await res.arrayBuffer());
+      const ds = new DecompressionStream('gzip');
+      const flat = new Uint8Array(await new Response(new Blob([gz]).stream().pipeThrough(ds)).arrayBuffer());
+      const dv = new DataView(flat.buffer, flat.byteOffset, flat.byteLength);
+      const dec = new TextDecoder(); let o = 0; const files = {};
+      while (o + 8 <= flat.length) {
+        const pl = dv.getUint32(o, false); const dl = dv.getUint32(o + 4, false); o += 8;
+        const path = dec.decode(flat.subarray(o, o + pl)); o += pl;
+        const data = dec.decode(flat.subarray(o, o + dl)); o += dl;
+        files[path] = data;
+      }
+      return files;
+    }
+
+    // Inline local <link>/<script src> resources so multi-file apps render in
+    // the srcdoc sandbox (no server to fetch from). Mirrors playground.js inlineApp.
+    const LOCAL_RE = /^(?!https?:\/\/|\/\/|data:|blob:|mailto:|#)/i;
+    function inlineApp(files) {
+      const m = new Map();
+      for (const [p, c] of Object.entries(files)) m.set(String(p).replace(/\\/g, '/').replace(/^\.?\//, ''), c);
+      let html = m.get('index.html') || [...m.values()][0] || '<!doctype html><p>empty app</p>';
+      const lookup = (href) => m.get(href.replace(/^\.?\//, '').split(/[?#]/)[0]);
+      html = html.replace(/<link\b[^>]*?>/gi, (tag) => {
+        if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
+        const hm = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+        if (!hm || !LOCAL_RE.test(hm[1])) return tag;
+        const css = lookup(hm[1]);
+        return css != null ? `<style>\n${css}\n</style>` : tag;
+      });
+      html = html.replace(/<script\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*)><\/script>/gi, (tag, pre, src, post) => {
+        if (!LOCAL_RE.test(src)) return tag;
+        const js = lookup(src);
+        if (js == null) return tag;
+        const keepType = /type\s*=\s*["']module["']/i.test(pre + post);
+        return `<script${keepType ? ' type="module"' : ''}>\n${js}\n</script>`;
+      });
+      return html;
+    }
+
+    async function verifyTreeHash(manifest) {
+      const enc = new TextEncoder();
+      const recomputed = await sha256Hex(enc.encode(manifest.files.map((e) => `${e.path}:${e.sha256}`).join('\n')));
+      return recomputed === manifest.treeHash;
+    }
+
+    (async () => {
+      if (!appId) { $('msg').textContent = 'No app id.'; return; }
+      try {
+        const obj = await sui.getObject({ id: appId, options: { showContent: true } });
+        const f = obj.data?.content?.fields;
+        if (!f) throw new Error('App not found on-chain');
+        $('appName').textContent = f.name || 'app';
+        $('by').textContent = 'by ' + short(f.builder);
+        $('chain').href = `https://suiscan.xyz/${net}/object/${appId}`;
+
+        const manRes = await fetch(`${AGG}/v1/blobs/${f.manifest_blob}`);
+        const manifest = manRes.ok ? await manRes.json() : null;
+        let files;
+        try {
+          files = await inflateArchive(f.archive_blob);
+        } catch {
+          // A private app's archive is Seal-encrypted (not gzip) — the public viewer
+          // can't decrypt it. Only the builder can, in the Playground (wallet-gated).
+          $('prov').textContent = '🔒 private · owner-only';
+          $('msg').innerHTML = '🔒 This app is private (Seal-encrypted).<br>Only its builder can open it — from the <a style="color:#4da2ff" href="./index.html#playground">Playground</a> with their wallet.';
+          return;
+        }
+        let html = inlineApp(files);
+        // Neutralize meta-refresh (a sandboxed frame can still navigate itself).
+        html = html.replace(/<meta\b[^>]*http-equiv\s*=\s*["']?\s*refresh[^>]*>/gi, '');
+        // defense-in-depth CSP: allow inline (apps are inline) but block network egress
+        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">`;
+        if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + csp);
+        else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => m + '<head>' + csp + '</head>');
+        else html = '<!doctype html><head>' + csp + '</head>' + html;
+
+        let ok = false;
+        if (manifest) {
+          const treeOk = await verifyTreeHash(manifest);
+          const anchorOk = !f.tree_hash || f.tree_hash === manifest.treeHash;
+          ok = treeOk && anchorOk;
+        }
+        const prov = $('prov');
+        prov.textContent = ok ? '✓ verified · treeHash matches on-chain' : '⚠ unverified';
+        prov.className = ok ? 'prov' : 'prov fail';
+
+        const frame = $('frame');
+        frame.srcdoc = html;
+        frame.style.display = 'block';
+        $('msg').style.display = 'none';
+      } catch (e) {
+        $('msg').textContent = 'Failed to load app: ' + (e.message || e);
+      }
+    })();
+  </script>
+</body>
+</html>

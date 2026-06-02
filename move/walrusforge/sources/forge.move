@@ -59,6 +59,8 @@ public struct Repository has key, store {
     /// AgentCap ids the owner has revoked. Checked in `assert_agent_scope`, so
     /// the owner can disable a delegated agent without holding its object.
     revoked_caps: VecSet<ID>,
+    /// Minimum APPROVE reviews required before a PR can be merged (0 = none).
+    min_approvals: u8,
 }
 
 /// Owner permission: update refs, merge PRs, publish releases. Soulbound to the
@@ -142,6 +144,7 @@ public fun create_repo(
         ref_version: 0,
         latest_release: option::none(),
         revoked_caps: vec_set::empty(),
+        min_approvals: 0,
     };
     let repo_id = object::id(&repo);
 
@@ -262,6 +265,43 @@ public fun assert_not_agent_merge(_cap: &AgentCap) {
     abort EAgentCannotMerge
 }
 
+// ===== Seal access policy (private agent memory / private repos) =====
+//
+// WalrusForge stores private agent memory (encrypted review notes, private repo
+// snapshots) on Walrus, encrypted with Seal. Seal key servers call one of these
+// `seal_approve_*` functions with the encryption identity `id`; the call must
+// abort unless the requester holds a cap for the repo whose id namespaces `id`.
+// Convention: `id` is `repo_id_bytes || arbitrary_suffix`, so only memory tied to
+// a repo can be unlocked by that repo's cap holders.
+
+const ESealIdMismatch: u64 = 7;
+
+/// True if `id` begins with `repo`'s object-id bytes (the namespace check).
+fun id_in_repo(repo: &Repository, id: &vector<u8>): bool {
+    let prefix = object::id_bytes(repo);
+    let plen = vector::length(&prefix);
+    if (vector::length(id) < plen) return false;
+    let mut i = 0;
+    while (i < plen) {
+        if (*vector::borrow(id, i) != *vector::borrow(&prefix, i)) return false;
+        i = i + 1;
+    };
+    true
+}
+
+/// Seal policy: the repo owner may decrypt any memory namespaced to their repo.
+entry fun seal_approve_owner(id: vector<u8>, repo: &Repository, cap: &RepoOwnerCap) {
+    assert_owner(repo, cap);
+    assert!(id_in_repo(repo, &id), ESealIdMismatch);
+}
+
+/// Seal policy: an agent with a (non-revoked, non-expired) cap for the repo and
+/// the `review` scope may decrypt memory namespaced to that repo.
+entry fun seal_approve_agent(id: vector<u8>, repo: &Repository, cap: &AgentCap, ctx: &TxContext) {
+    assert_agent_scope(repo, cap, SCOPE_REVIEW, ctx);
+    assert!(id_in_repo(repo, &id), ESealIdMismatch);
+}
+
 // ===== Mutators reserved for sibling modules within the package =====
 
 /// Record the latest release id on the repo. Package-internal: only callable by
@@ -277,6 +317,13 @@ public fun repo_name(repo: &Repository): String { repo.name }
 public fun current_snapshot(repo: &Repository): String { repo.current_snapshot }
 public fun ref_version(repo: &Repository): u64 { repo.ref_version }
 public fun default_branch(repo: &Repository): String { repo.default_branch }
+public fun min_approvals(repo: &Repository): u8 { repo.min_approvals }
+
+/// Owner sets the minimum APPROVE reviews required before a PR can merge.
+public fun set_min_approvals(repo: &mut Repository, cap: &RepoOwnerCap, n: u8) {
+    assert_owner(repo, cap);
+    repo.min_approvals = n;
+}
 public fun latest_release(repo: &Repository): Option<ID> { repo.latest_release }
 public fun repo_count(registry: &ForgeRegistry): u64 { registry.repo_count }
 public fun owner_cap_repo(cap: &RepoOwnerCap): ID { cap.repo_id }

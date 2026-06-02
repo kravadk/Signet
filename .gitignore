@@ -24,6 +24,22 @@ demo/sample-repo/
 *.key
 .env
 .env.*
+*.agent.env
+!.env.example
+
+# Transient CLI / deploy output artifacts (not source)
+move/walrusforge/*-out.json
+move/walrusforge/*-err.txt
+move/walrusforge/mn-*.json
+move/walrusforge/publish*.json
+move/walrusforge/forkreg*.json
+move/walrusforge/privreg*.json
+move/walrusforge/upgrade-*
+.claude/scheduled_tasks.lock
+
+# Scratch / backups (not part of the shipped project)
+web-next-backup/
+web-annotate/
 
 # OS / editor
 .DS_Store

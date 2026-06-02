@@ -18,12 +18,14 @@ import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const NET: "testnet" | "mainnet" = process.env.SUI_NETWORK === "mainnet" ? "mainnet" : "testnet";
 const deployment = JSON.parse(
   readFileSync(join(__dirname, "..", "..", "move", "walrusforge", "deployments.json"), "utf8"),
-).testnet;
+)[NET];
 const PACKAGE: string = deployment.packageId;
 
-const client = new SuiClient({ url: getFullnodeUrl("testnet") });
+const client = new SuiClient({ url: getFullnodeUrl(NET) });
+let ready = false; // becomes true after the first successful poll
 const db = new DatabaseSync(join(__dirname, "..", "forge.db"));
 db.exec("PRAGMA journal_mode = WAL;");
 
@@ -192,7 +194,8 @@ async function pollOnce() {
 // ===== REST API =====
 
 const app = express();
-app.get("/api/health", (_req, res) => res.json({ ok: true, package: PACKAGE }));
+app.get("/api/health", (_req, res) =>
+  res.status(ready ? 200 : 503).json({ ok: ready, package: PACKAGE, network: NET }));
 app.get("/api/repos", (_req, res) => res.json(db.prepare(`SELECT * FROM repos`).all()));
 app.get("/api/repos/:id", (req, res) => {
   const repo = db.prepare(`SELECT * FROM repos WHERE id=?`).get(req.params.id);
@@ -229,14 +232,23 @@ app.get("/api/activity", (_req, res) =>
 const PORT = Number(process.env.PORT ?? 4318);
 
 async function main() {
-  console.log(`WalrusForge indexer — package ${PACKAGE}`);
+  console.log(JSON.stringify({ level: "info", msg: "indexer starting", network: NET, package: PACKAGE }));
   await pollOnce();
-  console.log("initial index complete");
-  setInterval(() => void pollOnce(), 10_000);
-  app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+  ready = true; // /api/health flips to 200 only after the first poll completes
+  console.log(JSON.stringify({ level: "info", msg: "initial index complete" }));
+  const timer = setInterval(() => void pollOnce(), 10_000);
+  const server = app.listen(PORT, () => console.log(JSON.stringify({ level: "info", msg: "indexer API up", port: PORT })));
+  const stop = (sig: string) => {
+    console.log(JSON.stringify({ level: "info", msg: "shutdown", sig }));
+    clearInterval(timer);
+    server.close(() => { try { db.close(); } catch {} process.exit(0); });
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  process.on("SIGINT", () => stop("SIGINT"));
 }
 
 main().catch((e) => {
-  console.error("fatal:", e);
+  console.error(JSON.stringify({ level: "error", msg: "fatal", error: String(e?.message ?? e) }));
   process.exit(1);
 });

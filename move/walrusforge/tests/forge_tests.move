@@ -236,7 +236,7 @@ fun test_full_provenance_chain_and_reputation() {
         let mut rep = scen.take_shared<RepoReputation>();
         let mut pull = scen.take_shared<PullRequest>();
         let cap = scen.take_from_sender<RepoOwnerCap>();
-        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap);
+        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap, scen.ctx());
         assert!(pr::pr_status(&pull) == pr::status_merged(), 401);
         assert!(forge::current_snapshot(&repo) == s(b"blob_head"), 402);
         // Reputation: AGENT opened 1, reviewed 1, merged 1.
@@ -301,7 +301,7 @@ fun test_stale_merge_aborts() {
         let mut rep = scen.take_shared<RepoReputation>();
         let mut pull = scen.take_shared<PullRequest>();
         let cap = scen.take_from_sender<RepoOwnerCap>();
-        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap);
+        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap, scen.ctx());
         scen.return_to_sender(cap);
         ts::return_shared(pull);
         ts::return_shared(rep);
@@ -347,17 +347,19 @@ fun test_bounty_full_flow() {
     {
         let repo = scen.take_shared<Repository>();
         let payment = coin::mint_for_testing<SUI>(1000, scen.ctx());
-        bounty::post_bounty(&repo, s(b"fix the test"), payment, scen.ctx());
+        bounty::post_bounty(&repo, s(b"fix the test"), payment, 0, scen.ctx());
         ts::return_shared(repo);
     };
     // Agent claims + submits.
     scen.next_tx(AGENT);
     {
         let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
         assert!(bounty::bounty_status(&b) == bounty::status_open(), 700);
-        bounty::claim_bounty(&mut b, scen.ctx());
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
         assert!(bounty::bounty_status(&b) == bounty::status_claimed(), 701);
         bounty::submit_bounty(&mut b, s(b"pr_0xabc"), scen.ctx());
+        ts::return_shared(rep);
         ts::return_shared(b);
     };
     // Funder approves -> claimant paid (minus fee).
@@ -386,7 +388,7 @@ fun test_bounty_cancel_refunds() {
     {
         let repo = scen.take_shared<Repository>();
         let payment = coin::mint_for_testing<SUI>(500, scen.ctx());
-        bounty::post_bounty(&repo, s(b"unclaimed"), payment, scen.ctx());
+        bounty::post_bounty(&repo, s(b"unclaimed"), payment, 0, scen.ctx());
         ts::return_shared(repo);
     };
     scen.next_tx(FUNDER);
@@ -413,13 +415,15 @@ fun test_bounty_only_funder_approves() {
     {
         let repo = scen.take_shared<Repository>();
         let payment = coin::mint_for_testing<SUI>(100, scen.ctx());
-        bounty::post_bounty(&repo, s(b"b"), payment, scen.ctx());
+        bounty::post_bounty(&repo, s(b"b"), payment, 0, scen.ctx());
         ts::return_shared(repo);
     };
     scen.next_tx(AGENT);
     {
         let mut b = scen.take_shared<Bounty>();
-        bounty::claim_bounty(&mut b, scen.ctx());
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        ts::return_shared(rep);
         ts::return_shared(b);
     };
     // AGENT (not funder) tries to approve -> abort.
@@ -427,6 +431,241 @@ fun test_bounty_only_funder_approves() {
     {
         let mut b = scen.take_shared<Bounty>();
         bounty::approve_bounty(&mut b, scen.ctx());
+        ts::return_shared(b);
+    };
+    scen.end();
+}
+
+// ===== Trust layer: score, vouching, approval-gated merge, score-locked bounty =====
+
+/// Run a full open->review(approve)->merge cycle so AGENT earns score.
+/// Returns with all objects back to the pool. Score after = merged*10 + review*3 = 13.
+fun earn_score(scen: &mut Scenario) {
+    grant_pr_review_cap(scen);
+    scen.next_tx(AGENT);
+    {
+        let repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let cap = scen.take_from_sender<AgentCap>();
+        pr::open_pr_as_agent(&repo, &mut rep, &cap, s(b"blob_head"), s(b"blob_diff"), s(b"pr1"), scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(AGENT);
+    {
+        let repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let mut pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<AgentCap>();
+        pr::submit_review_as_agent(&repo, &mut rep, &mut pull, &cap, pr::verdict_approve(), s(b"blob_report"), scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let mut pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap, scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+}
+
+#[test]
+fun test_score_aggregates() {
+    let mut scen = setup();
+    earn_score(&mut scen);
+    scen.next_tx(AGENT);
+    {
+        let rep = scen.take_shared<RepoReputation>();
+        // merged 1 (*10) + reviews 1 (*3) + opened 1 (*0) = 13
+        assert!(reputation::score_of(&rep, AGENT) == 13, 800);
+        let prof = reputation::profile(&rep, AGENT);
+        assert!(reputation::score(&prof) == 13, 801);
+        ts::return_shared(rep);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_vouch_raises_score() {
+    let mut scen = setup();
+    earn_score(&mut scen); // AGENT now has score 13 (>= VOUCH_MIN_SCORE 10)
+    scen.next_tx(AGENT);
+    {
+        let mut rep = scen.take_shared<RepoReputation>();
+        reputation::vouch(&mut rep, FUNDER, scen.ctx());
+        // FUNDER gets vouches 1 (*5) = 5
+        assert!(reputation::score_of(&rep, FUNDER) == 5, 810);
+        ts::return_shared(rep);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = walrusforge::reputation::EVouchScoreTooLow)]
+fun test_low_score_cannot_vouch() {
+    let mut scen = setup();
+    // FUNDER has zero score, tries to vouch -> abort.
+    scen.next_tx(FUNDER);
+    {
+        let mut rep = scen.take_shared<RepoReputation>();
+        reputation::vouch(&mut rep, AGENT, scen.ctx());
+        ts::return_shared(rep);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = walrusforge::reputation::EVouchSelf)]
+fun test_cannot_vouch_self() {
+    let mut scen = setup();
+    earn_score(&mut scen);
+    scen.next_tx(AGENT);
+    {
+        let mut rep = scen.take_shared<RepoReputation>();
+        reputation::vouch(&mut rep, AGENT, scen.ctx());
+        ts::return_shared(rep);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = walrusforge::pull_request::ENotEnoughApprovals)]
+fun test_merge_blocked_below_min_approvals() {
+    let mut scen = setup();
+    grant_pr_review_cap(&mut scen);
+    // Owner requires 1 approval.
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        forge::set_min_approvals(&mut repo, &cap, 1);
+        scen.return_to_sender(cap);
+        ts::return_shared(repo);
+    };
+    // Agent opens a PR (no approval yet).
+    scen.next_tx(AGENT);
+    {
+        let repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let cap = scen.take_from_sender<AgentCap>();
+        pr::open_pr_as_agent(&repo, &mut rep, &cap, s(b"blob_head"), s(b"blob_diff"), s(b"pr1"), scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    // Owner merges with 0 approvals -> abort.
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let mut pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap, scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_merge_passes_with_enough_approvals() {
+    let mut scen = setup();
+    earn_score(&mut scen); // includes an approve review + merge; passes when min=0
+    // Now set min=1 and run another approved cycle to confirm gate passes.
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        forge::set_min_approvals(&mut repo, &cap, 1);
+        scen.return_to_sender(cap);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(AGENT);
+    {
+        let repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let cap = scen.take_from_sender<AgentCap>();
+        // base advanced to blob_head after earn_score's merge; open from there
+        pr::open_pr_as_agent(&repo, &mut rep, &cap, s(b"blob_head2"), s(b"blob_diff2"), s(b"pr2"), scen.ctx());
+        scen.return_to_sender(cap);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(AGENT);
+    {
+        let repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let mut pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<AgentCap>();
+        pr::submit_review_as_agent(&repo, &mut rep, &mut pull, &cap, pr::verdict_approve(), s(b"blob_report2"), scen.ctx());
+        assert!(pr::pr_approvals(&pull) == 1, 820);
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let mut rep = scen.take_shared<RepoReputation>();
+        let mut pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        pr::merge_pr(&mut repo, &mut rep, &mut pull, &cap, scen.ctx());
+        assert!(pr::pr_status(&pull) == pr::status_merged(), 821);
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(rep);
+        ts::return_shared(repo);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_set_min_approvals_sets_value() {
+    let mut scen = setup();
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        assert!(forge::min_approvals(&repo) == 0, 830);
+        forge::set_min_approvals(&mut repo, &cap, 2);
+        assert!(forge::min_approvals(&repo) == 2, 831);
+        scen.return_to_sender(cap);
+        ts::return_shared(repo);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = walrusforge::bounty::EScoreTooLow)]
+fun test_bounty_score_lock_blocks_low_score() {
+    let mut scen = setup();
+    // Funder posts a bounty requiring score >= 5.
+    scen.next_tx(FUNDER);
+    {
+        let repo = scen.take_shared<Repository>();
+        let payment = coin::mint_for_testing<SUI>(1000, scen.ctx());
+        bounty::post_bounty(&repo, s(b"needs-rep"), payment, 5, scen.ctx());
+        ts::return_shared(repo);
+    };
+    // OWNER (zero score in this repo) tries to claim -> abort.
+    scen.next_tx(OWNER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        ts::return_shared(rep);
         ts::return_shared(b);
     };
     scen.end();

@@ -16,6 +16,7 @@ use walrusforge::reputation::{Self, RepoReputation};
 const EPrRepoMismatch: u64 = 0;
 const EPrNotOpen: u64 = 1;
 const EBaseStale: u64 = 2;
+const ENotEnoughApprovals: u64 = 3;
 
 // ===== PR status =====
 
@@ -53,6 +54,8 @@ public struct PullRequest has key, store {
     status: u8,
     /// Walrus blob ids of attached review reports (for quick UI listing).
     review_refs: vector<String>,
+    /// Count of reviews with the APPROVE verdict — used to gate merge.
+    approvals: u64,
 }
 
 /// A review attached to a PR. `report_blob` is the Walrus blob id of the full
@@ -143,6 +146,7 @@ fun open_pr_internal(
         title,
         status: STATUS_OPEN,
         review_refs: vector[],
+        approvals: 0,
     };
     event::emit(PrOpened {
         pr_id: object::id(&pr),
@@ -151,7 +155,7 @@ fun open_pr_internal(
         base_snapshot: pr.base_snapshot,
         head_snapshot: pr.head_snapshot,
     });
-    reputation::bump_pr_opened(rep, ctx.sender());
+    reputation::bump_pr_opened(rep, ctx.sender(), ctx);
     transfer::share_object(pr);
 }
 
@@ -204,6 +208,7 @@ fun submit_review_internal(
         report_blob,
     };
     vector::push_back(&mut pr.review_refs, report_blob);
+    if (verdict == VERDICT_APPROVE) { pr.approvals = pr.approvals + 1; };
     event::emit(ReviewSubmitted {
         review_id: object::id(&review),
         pr_id: object::id(pr),
@@ -211,7 +216,7 @@ fun submit_review_internal(
         verdict,
         report_blob,
     });
-    reputation::bump_review(rep, ctx.sender());
+    reputation::bump_review(rep, ctx.sender(), ctx);
     transfer::share_object(review);
 }
 
@@ -225,11 +230,15 @@ public fun merge_pr(
     rep: &mut RepoReputation,
     pr: &mut PullRequest,
     cap: &RepoOwnerCap,
+    ctx: &TxContext,
 ) {
     forge::assert_owner(repo, cap);
     assert!(pr.repo_id == object::id(repo), EPrRepoMismatch);
     assert!(pr.status == STATUS_OPEN, EPrNotOpen);
     assert!(pr.base_snapshot == forge::current_snapshot(repo), EBaseStale);
+    // Enforced review threshold: the repo's min_approvals must be met. Owner
+    // still merges, but cannot bypass the approvals gate they configured.
+    assert!(pr.approvals >= (forge::min_approvals(repo) as u64), ENotEnoughApprovals);
 
     forge::update_ref(repo, cap, pr.head_snapshot);
     pr.status = STATUS_MERGED;
@@ -240,7 +249,7 @@ public fun merge_pr(
         merged_snapshot: pr.head_snapshot,
     });
     // Credit the PR author with a merged PR.
-    reputation::bump_pr_merged(rep, pr.author);
+    reputation::bump_pr_merged(rep, pr.author, ctx);
 }
 
 /// Close a PR without merging. Owner-only.
@@ -261,6 +270,7 @@ public fun pr_head(pr: &PullRequest): String { pr.head_snapshot }
 public fun pr_diff_manifest(pr: &PullRequest): String { pr.diff_manifest }
 public fun pr_repo(pr: &PullRequest): ID { pr.repo_id }
 public fun pr_review_count(pr: &PullRequest): u64 { vector::length(&pr.review_refs) }
+public fun pr_approvals(pr: &PullRequest): u64 { pr.approvals }
 public fun review_verdict(r: &Review): u8 { r.verdict }
 public fun review_reporter(r: &Review): address { r.reviewer }
 public fun review_blob(r: &Review): String { r.report_blob }

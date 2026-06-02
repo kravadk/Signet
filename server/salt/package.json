@@ -1,0 +1,11 @@
+{
+  "name": "walrusforge-salt",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "zkLogin salt service: deterministic, stateless per-user salt from a verified Google JWT (backend P0).",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.mjs"
+  }
+}

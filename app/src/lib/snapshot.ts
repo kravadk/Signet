@@ -58,7 +58,7 @@ function toPosix(p: string): string {
   return p.split(sep).join("/");
 }
 
-function sha256(bytes: Uint8Array): string {
+export function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 

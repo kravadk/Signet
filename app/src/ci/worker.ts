@@ -22,8 +22,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { storeBlob, readBlob, readBlobText, blobUrl } from "../lib/walrus.js";
-import { extractArchive, parseManifest } from "../lib/snapshot.js";
+import { storeBlobAuto, readBlob, readBlobText, blobUrl } from "../lib/walrus.js";
+import { extractArchive, parseManifest, verifyTreeHash, sha256 } from "../lib/snapshot.js";
 import { makeContextWithKeypair, submitReviewAsAgent } from "../lib/sui.js";
 import { getPullRequest, findReputationLedger } from "../lib/forge-read.js";
 import { requireCiKey } from "./keypair.js";
@@ -112,21 +112,36 @@ async function main() {
         r.output.slice(0, 4000),
       ].join("\n");
     } else {
-      // Non-Move snapshot: fall back to an integrity check (treeHash).
-      passed = true;
+      // Non-Move snapshot: run a REAL integrity check. Recompute the sha256 of
+      // every extracted file and compare it to the manifest, and re-derive the
+      // manifest treeHash. passed is the actual result — never hardcoded — so a
+      // tampered snapshot produces an on-chain REQUEST_CHANGES, not a fake PASS.
+      const mismatches: string[] = [];
+      for (const entry of manifest.files) {
+        const bytes = files.get(entry.path);
+        if (!bytes) { mismatches.push(`${entry.path}: missing in archive`); continue; }
+        const got = sha256(bytes);
+        if (got !== entry.sha256) {
+          mismatches.push(`${entry.path}: sha256 ${got.slice(0, 12)}… ≠ manifest ${String(entry.sha256).slice(0, 12)}…`);
+        }
+      }
+      const treeOk = verifyTreeHash(manifest);
+      if (!treeOk) mismatches.push(`treeHash mismatch (manifest ${manifest.treeHash.slice(0, 12)}…)`);
+      passed = mismatches.length === 0;
       report = [
         "WalrusForge CI report",
         `repo: ${repoId}`,
         `pr: ${prId}`,
         `runner: ${ctx.address}`,
         `command: integrity-check (no Move.toml found)`,
-        `result: PASS (manifest treeHash ${manifest.treeHash})`,
+        `result: ${passed ? "PASS" : "FAIL"} — verified ${manifest.files.length} file hash(es) + treeHash`,
         `files: ${files.size}`,
+        ...(mismatches.length ? ["", "--- mismatches ---", ...mismatches.slice(0, 50)] : []),
       ].join("\n");
     }
 
-    // 4. Upload the report to Walrus.
-    const reportBlob = await storeBlob(report);
+    // 4. Upload the report to Walrus (active-network aware — mainnet uses CLI).
+    const reportBlob = await storeBlobAuto(report);
     console.log(`report uploaded: ${blobUrl(reportBlob.blobId)} (passed=${passed})`);
 
     // 5. Submit the review on-chain (CI agent signs).

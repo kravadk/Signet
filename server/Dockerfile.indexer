@@ -1,0 +1,16 @@
+# WalrusForge indexer (events → SQLite → REST). node:18 glibc for node:sqlite.
+# BUILD CONTEXT = repo root.
+FROM node:18
+WORKDIR /app
+COPY server/package.json server/package-lock.json* ./server/
+RUN cd server && (npm ci || npm install)
+COPY server/src ./server/src
+COPY server/tsconfig.json ./server/tsconfig.json
+COPY move/walrusforge/deployments.json ./move/walrusforge/deployments.json
+WORKDIR /app/server
+ENV PORT=4318
+ENV SUI_NETWORK=testnet
+EXPOSE 4318
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD node -e "fetch('http://localhost:4318/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "--experimental-sqlite", "--import", "tsx", "src/index.ts"]
