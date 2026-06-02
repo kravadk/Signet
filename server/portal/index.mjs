@@ -1,5 +1,5 @@
 /**
- * WalrusForge — public portal (human URLs + share cards + verified render).
+ * Signet — public portal (human URLs + share cards + verified render).
  *
  * Closes the "real shareable URL" gap: a static SPA can't emit per-app Open Graph
  * meta, so social/link previews are blank. This portal serves each published app
@@ -28,7 +28,7 @@ import { installShutdown, log, fetchT, ttlCache } from './lib.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8790);
 const ORIGIN = process.env.PUBLIC_ORIGIN || `http://localhost:${PORT}`;
-const DEPLOY = JSON.parse(readFileSync(join(__dirname, '..', '..', 'move', 'walrusforge', 'deployments.json'), 'utf8'));
+const DEPLOY = JSON.parse(readFileSync(join(__dirname, '..', '..', 'move', 'signet', 'deployments.json'), 'utf8'));
 
 const NETS = {};
 for (const net of ['testnet', 'mainnet']) {
@@ -102,11 +102,11 @@ const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
 function shell({ title, desc, canonical, bar, bodyHtml }) {
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · WalrusForge</title>
+<title>${esc(title)} · Signet</title>
 <meta name="description" content="${esc(desc)}">
-<meta property="og:type" content="website"><meta property="og:title" content="${esc(title)} · WalrusForge">
+<meta property="og:type" content="website"><meta property="og:title" content="${esc(title)} · Signet">
 <meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(canonical)}">
-<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)} · WalrusForge">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)} · Signet">
 <meta name="twitter:description" content="${esc(desc)}"><link rel="canonical" href="${esc(canonical)}">
 <style>:root{--blue:#4da2ff;--bg:#060606;--bd:#1d3a52;--tx:#cfe6ff;--green:#46d18a}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',ui-monospace,monospace}
@@ -162,7 +162,7 @@ async function renderAppPage(net, id) {
         : `<p class="prov fail">The app's bytes have expired on Walrus. The on-chain record (provenance, hash, metrics) is permanent; the builder can re-pin to restore it.</p>`) +
       `<a class="btn" href="${esc(N.explorer(id))}" target="_blank" rel="noreferrer">View on-chain record ↗</a></div></div>`
     : `<iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${esc(html)}"></iframe>`;
-  return { code: 200, html: shell({ title: app.name, desc: app.prompt || `An app built on WalrusForge · ${app.visits} visits · ${app.stars}★`, canonical: `${ORIGIN}/app/${id}${net === 'mainnet' ? '?net=mainnet' : ''}`, bar, bodyHtml: body }) };
+  return { code: 200, html: shell({ title: app.name, desc: app.prompt || `An app built on Signet · ${app.visits} visits · ${app.stars}★`, canonical: `${ORIGIN}/app/${id}${net === 'mainnet' ? '?net=mainnet' : ''}`, bar, bodyHtml: body }) };
 }
 
 // Query an event struct across all historical playground packages (its type uses
@@ -201,14 +201,14 @@ async function renderProfile(net, handle) {
   if (!addr) return { code: 404, html: notFound(`@${esc(handle)} — handle not claimed.`) };
   const apps = (await listApps(net, 200)).filter((a) => a.builder === addr);
   const visits = apps.reduce((n, a) => n + a.visits, 0), stars = apps.reduce((n, a) => n + a.stars, 0);
-  const bar = `<b>@${esc(handle)}</b><span class="sp"></span><a href="${ORIGIN}">WalrusForge</a>`;
+  const bar = `<b>@${esc(handle)}</b><span class="sp"></span><a href="${ORIGIN}">Signet</a>`;
   const cards = apps.map((a) => `<div class="card"><b>${esc(a.name)}</b> — ${esc(a.prompt).slice(0, 120)}<br>` +
     `<small>▶ ${a.visits} · ★ ${a.stars}</small> · <a class="btn" href="${ORIGIN}/app/${a.id}${net === 'mainnet' ? '?net=mainnet' : ''}">Open</a></div>`).join('') || '<p>No apps yet.</p>';
   const body = `<div class="wrap"><h1>@${esc(handle)}</h1><p>${apps.length} apps · ${visits} visits · ${stars}★ · ${esc(short(addr))}</p>${cards}</div>`;
-  return { code: 200, html: shell({ title: `@${handle}`, desc: `${apps.length} apps · ${visits} visits · ${stars}★ on WalrusForge`, canonical: `${ORIGIN}/@${handle}${net === 'mainnet' ? '?net=mainnet' : ''}`, bar, bodyHtml: body }) };
+  return { code: 200, html: shell({ title: `@${handle}`, desc: `${apps.length} apps · ${visits} visits · ${stars}★ on Signet`, canonical: `${ORIGIN}/@${handle}${net === 'mainnet' ? '?net=mainnet' : ''}`, bar, bodyHtml: body }) };
 }
 
-const notFound = (msg) => shell({ title: 'Not found', desc: msg, canonical: ORIGIN, bar: `<b>WalrusForge</b>`, bodyHtml: `<div class="wrap"><div class="card">${esc(msg)}</div></div>` });
+const notFound = (msg) => shell({ title: 'Not found', desc: msg, canonical: ORIGIN, bar: `<b>Signet</b>`, bodyHtml: `<div class="wrap"><div class="card">${esc(msg)}</div></div>` });
 
 // Readiness: one cheap RPC per net (cached) so /health reflects real RPC reachability.
 const rpcReady = ttlCache(30_000);
@@ -254,7 +254,7 @@ const server = createServer(async (req, res) => {
       }
       const rows = svcs.map((s) => `<div class="card"><span class="prov${s.ok ? '' : ' fail'}">${s.ok ? '✓' : '✗'} ${esc(s.name)}</span></div>`).join('');
       res.writeHead(allOk ? 200 : 503, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(shell({ title: 'Status', desc: 'WalrusForge service status', canonical: `${ORIGIN}/status`, bar: '<b>WalrusForge status</b>', bodyHtml: `<div class="wrap">${rows}</div>` }));
+      return res.end(shell({ title: 'Status', desc: 'Signet service status', canonical: `${ORIGIN}/status`, bar: '<b>Signet status</b>', bodyHtml: `<div class="wrap">${rows}</div>` }));
     }
     if (u.pathname === '/api/apps') {
       const apps = await listApps(net, Number(u.searchParams.get('limit') || 60));

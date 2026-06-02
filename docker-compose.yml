@@ -1,4 +1,4 @@
-# WalrusForge — full stack (5 services + static web). `docker compose up --build`.
+# Signet — full stack (5 services + static web). `docker compose up --build`.
 # Secrets come from a gitignored .env (see .env.example). Browser-reachable URLs
 # in `web` use localhost:PORT (the browser calls them, not the web container);
 # portal's SERVICES uses internal compose names (server-to-server health fan-out).

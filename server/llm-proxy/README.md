@@ -1,4 +1,4 @@
-# WalrusForge — LLM proxy (backend P0)
+# Signet — LLM proxy (backend P0)
 
 A tiny, dependency-free Anthropic relay so Playground users can build apps **without
 pasting their own API key** (no BYOK). It only forwards `prompt → completion`; it is
@@ -15,14 +15,14 @@ can just type a prompt.
 cd server/llm-proxy
 cp .env.example .env        # put your real ANTHROPIC_API_KEY in it
 ANTHROPIC_API_KEY=sk-ant-... npm start    # or: node index.mjs
-# -> WalrusForge LLM proxy on :8787
+# -> Signet LLM proxy on :8787
 curl localhost:8787/health   # {"ok":true}
 ```
 
 ## Deploy
 Any Node 18+ host works (Render, Railway, Fly, a VPS, etc.). Set the env vars from
 `.env.example` in the host dashboard. Then **lock `ALLOWED_ORIGIN`** to your deployed
-site origin (e.g. `https://walrusforge.wal.app`) so only your site can spend your key.
+site origin (e.g. `https://signet.wal.app`) so only your site can spend your key.
 
 ## API (matches the client `callLLM` proxy mode)
 - `POST /llm` — body `{ model, system, messages }` → `{ text }`

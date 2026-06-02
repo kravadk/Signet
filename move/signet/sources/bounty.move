@@ -1,19 +1,19 @@
-/// Bounties for WalrusForge — on-chain SUI escrow for repo work.
+/// Bounties for Signet — on-chain SUI escrow for repo work.
 ///
 /// A funder posts a bounty against a repo, locking SUI in the `Bounty` object.
 /// An agent (or human) claims it, submits a PR as proof, and the funder approves
 /// — releasing the escrow to the claimant minus a small protocol fee. If nobody
-/// delivers, the funder can cancel and reclaim. This gives WalrusForge a real
+/// delivers, the funder can cancel and reclaim. This gives Signet a real
 /// incentive layer: agents get paid for verifiable, merged work.
-module walrusforge::bounty;
+module signet::bounty;
 
 use std::string::String;
 use sui::balance::{Self, Balance};
 use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::event;
-use walrusforge::forge::Repository;
-use walrusforge::reputation::{Self, RepoReputation};
+use signet::forge::Repository;
+use signet::reputation::{Self, RepoReputation};
 
 // ===== Errors =====
 

@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — zkLogin (sign in with Google → Sui address, no wallet).
+   Signet — zkLogin (sign in with Google → Sui address, no wallet).
    Pairs with server/salt (stable salt) + a zk prover (Mysten-hosted or self-
    hosted) + the sponsor service (gasless). Implements the official Sui zkLogin
    flow from @mysten/sui/zklogin.

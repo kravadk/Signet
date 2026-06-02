@@ -10,7 +10,7 @@ node_modules/
 *.tsbuildinfo
 
 # Move build
-move/walrusforge/build/
+move/signet/build/
 
 # Indexer database (rebuildable from chain)
 server/*.db
@@ -28,13 +28,13 @@ demo/sample-repo/
 !.env.example
 
 # Transient CLI / deploy output artifacts (not source)
-move/walrusforge/*-out.json
-move/walrusforge/*-err.txt
-move/walrusforge/mn-*.json
-move/walrusforge/publish*.json
-move/walrusforge/forkreg*.json
-move/walrusforge/privreg*.json
-move/walrusforge/upgrade-*
+move/signet/*-out.json
+move/signet/*-err.txt
+move/signet/mn-*.json
+move/signet/publish*.json
+move/signet/forkreg*.json
+move/signet/privreg*.json
+move/signet/upgrade-*
 .claude/scheduled_tasks.lock
 
 # Scratch / backups (not part of the shipped project)

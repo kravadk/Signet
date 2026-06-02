@@ -1,5 +1,5 @@
 /**
- * WalrusForge — LLM proxy (backend P0, onboarding accelerator).
+ * Signet — LLM proxy (backend P0, onboarding accelerator).
  *
  * A tiny, dependency-free relay that holds the Anthropic API key server-side so
  * Playground users don't need their own (no BYOK). It is intentionally NOT a

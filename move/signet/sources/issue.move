@@ -1,14 +1,14 @@
-/// Issues for WalrusForge.
+/// Issues for Signet.
 ///
 /// Lightweight issue tracker anchored on Sui. Anyone can open an issue on a repo
 /// (issues are public discussion, not privileged writes); the issue author or
 /// the repo owner can close it. Comment bodies live in Walrus (blob id), the
 /// on-chain object anchors author + status + ordering.
-module walrusforge::issue;
+module signet::issue;
 
 use std::string::String;
 use sui::event;
-use walrusforge::forge::{Self, Repository, RepoOwnerCap};
+use signet::forge::{Self, Repository, RepoOwnerCap};
 
 // ===== Errors =====
 

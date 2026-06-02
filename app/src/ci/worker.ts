@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 /**
- * WalrusForge CI worker.
+ * Signet CI worker.
  *
  * Acts as a dedicated CI *agent* identity (FORGE_CI_KEY) holding an AgentCap with
  * the review scope. Given a PR, it:
@@ -101,7 +101,7 @@ async function main() {
       const r = runMoveTest(work);
       passed = r.passed;
       report = [
-        "WalrusForge CI report",
+        "Signet CI report",
         `repo: ${repoId}`,
         `pr: ${prId}`,
         `runner: ${ctx.address}`,
@@ -129,7 +129,7 @@ async function main() {
       if (!treeOk) mismatches.push(`treeHash mismatch (manifest ${manifest.treeHash.slice(0, 12)}…)`);
       passed = mismatches.length === 0;
       report = [
-        "WalrusForge CI report",
+        "Signet CI report",
         `repo: ${repoId}`,
         `pr: ${prId}`,
         `runner: ${ctx.address}`,

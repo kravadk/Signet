@@ -1,4 +1,4 @@
-# WalrusForge static SPA. Generates config.js from WF_* env at start, then serves.
+# Signet static SPA. Generates config.js from WF_* env at start, then serves.
 # BUILD CONTEXT = web/
 FROM node:18-alpine
 RUN npm i -g serve@14

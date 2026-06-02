@@ -1,4 +1,4 @@
-// WalrusForge — copy-light production hardening helpers (zero deps, Node 18+).
+// Signet — copy-light production hardening helpers (zero deps, Node 18+).
 // An identical copy lives in each service dir so the images stay dependency-light.
 
 export const log = (level, msg, extra = {}) =>

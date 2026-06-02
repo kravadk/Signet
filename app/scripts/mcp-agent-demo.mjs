@@ -1,13 +1,13 @@
 /**
  * Real agent ↔ MCP demo driver.
  *
- * Spawns the WalrusForge MCP server over stdio exactly as an MCP client (Claude
+ * Spawns the Signet MCP server over stdio exactly as an MCP client (Claude
  * Desktop / Cursor) would, signing as a *separate agent identity* via
  * FORGE_AGENT_KEY (loaded from app/.agent.env — never printed). It performs the
  * real agent loop over the protocol:
  *   tools/list  →  pr_create  →  review_submit  →  agent_reputation
  *
- * This is the proof that an AI agent can drive WalrusForge through MCP — not a
+ * This is the proof that an AI agent can drive Signet through MCP — not a
  * scripted owner transaction.
  *
  * Usage: node --import tsx scripts/mcp-agent-demo.mjs <repoId> <agentCapId>
@@ -75,7 +75,7 @@ async function main() {
   await rpc('initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
-    clientInfo: { name: 'walrusforge-agent-demo', version: '1.0.0' },
+    clientInfo: { name: 'signet-agent-demo', version: '1.0.0' },
   });
   notify('notifications/initialized', {});
 

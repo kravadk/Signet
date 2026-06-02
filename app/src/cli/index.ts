@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 /**
- * WalrusForge CLI.
+ * Signet CLI.
  *
  * Commands:
  *   forge init            create a repo: snapshot the dir, upload to Walrus,
@@ -93,7 +93,7 @@ async function uploadSnapshot(
 const NET = process.env.FORGE_NETWORK === "mainnet" ? "mainnet" : "testnet";
 
 const program = new Command();
-program.name("forge").description("WalrusForge — agent-native release network").version("0.1.0");
+program.name("forge").description("Signet — agent-native release network").version("0.1.0");
 
 program
   .command("init")
@@ -322,7 +322,7 @@ program
     const ctx = makeContext(NET);
     const pkg = ctx.deployment.packageId;
     const ok = (b: boolean) => (b ? "✓" : "✗");
-    console.log(`\nWalrusForge doctor — ${ctx.deployment.chainId ?? "testnet"}\n`);
+    console.log(`\nSignet doctor — ${ctx.deployment.chainId ?? "testnet"}\n`);
     // wallet
     let bal = 0n;
     try { bal = BigInt((await ctx.client.getBalance({ owner: ctx.address })).totalBalance); } catch {}
@@ -372,7 +372,7 @@ program
   .action(async (opts) => {
     const { verifyRelease } = await import("../lib/actions.js");
     const r = await verifyRelease(opts.release);
-    console.log(`\nWalrusForge — verify ${r.version ?? "release"}  (${opts.release})\n`);
+    console.log(`\nSignet — verify ${r.version ?? "release"}  (${opts.release})\n`);
     for (const s of r.steps) {
       console.log(`  [${s.ok ? "✓" : "✗"}] ${s.label}`);
       console.log(`        ${s.detail}`);

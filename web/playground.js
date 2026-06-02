@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — Playground: chat → AI builds an app → live
+   Signet — Playground: chat → AI builds an app → live
    preview → publish to Sui+Walrus → gallery → remix.
 
    The compelling loop:
@@ -81,7 +81,7 @@ let llm = Object.assign(
 );
 
 const SYSTEM_PROMPT = [
-  'You are an expert web app builder for WalrusForge Playground.',
+  'You are an expert web app builder for Signet Playground.',
   'Given a description, output a COMPLETE, self-contained web app as JSON.',
   'Return ONLY a JSON object, no prose, no markdown fences, with this exact shape:',
   '{"name":"kebab-case-name","category":"one of: game|tool|art|data|social|other",',
@@ -285,7 +285,7 @@ export function renderPlaygroundView() {
   root.dataset.built = '1';
   root.innerHTML = `
     <div class="view-head">
-      <h1>Build an app — prove it's yours <span class="wave">🦭</span></h1>
+      <h1>Build an app — prove it's yours <span class="wave">🔏</span></h1>
       <p><b>Describe an app, an AI builds it live, you publish it to Walrus + Sui.</b>
       Every published app carries <b>verifiable provenance</b> — who built it, the exact content hash,
       and unfakeable on-chain visits, stars and a remix lineage. The gallery below is read live from the chain.

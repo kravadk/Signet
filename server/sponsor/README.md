@@ -1,4 +1,4 @@
-# WalrusForge — sponsored-transaction service (backend P0)
+# Signet — sponsored-transaction service (backend P0)
 
 Pays gas so a first-time user can run **value-free** Playground actions (record a
 visit, star, flag, claim a `@handle`, publish/update an app) **without holding any
@@ -26,7 +26,7 @@ limit, request-size cap, gas budget cap, CORS pinned to your origin.
 cd server/sponsor
 npm install
 cp .env.example .env   # set SPONSOR_PRIVATE_KEY (funded) + ALLOWED_PACKAGES
-npm start              # -> WalrusForge sponsor on :8788 · sponsor 0x…
+npm start              # -> Signet sponsor on :8788 · sponsor 0x…
 curl localhost:8788/health
 ```
 

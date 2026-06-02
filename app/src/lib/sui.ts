@@ -1,10 +1,10 @@
 /**
- * Sui client + PTB builders for WalrusForge.
+ * Sui client + PTB builders for Signet.
  *
  * Loads the keypair from the local Sui CLI keystore (the same wallet the CLI
  * signs with — we never take a raw private key as input), connects to testnet,
  * and exposes one function per on-chain action. Each builds a programmable
- * transaction calling the deployed `walrusforge` package.
+ * transaction calling the deployed `signet` package.
  */
 
 import { homedir } from "node:os";
@@ -20,7 +20,7 @@ import type { Keypair } from "@mysten/sui/cryptography";
 
 // Resolve deployments.json relative to the move package (sibling of app/).
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEPLOYMENTS_PATH = join(__dirname, "..", "..", "..", "move", "walrusforge", "deployments.json");
+const DEPLOYMENTS_PATH = join(__dirname, "..", "..", "..", "move", "signet", "deployments.json");
 
 export interface Deployment {
   chainId: string;
@@ -42,7 +42,7 @@ export function loadDeployment(network = "testnet"): Deployment {
   if (!d.packageId) {
     throw new Error(
       `Deployment for ${network} is not published yet (empty packageId). ` +
-        `Publish the package on ${network} and fill move/walrusforge/deployments.json.`,
+        `Publish the package on ${network} and fill move/signet/deployments.json.`,
     );
   }
   return d;

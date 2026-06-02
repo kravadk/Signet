@@ -1,4 +1,4 @@
-// Deploy-time config for the WalrusForge web SPA. Loaded (plain <script>) before
+// Deploy-time config for the Signet web SPA. Loaded (plain <script>) before
 // app.js; shared.js reads window.__WF_CONFIG. PRECEDENCE: defaults → __WF_CONFIG →
 // ?query → localStorage.
 //
@@ -11,7 +11,7 @@
 // URLs below, e.g.:
 //   window.__WF_CONFIG = {
 //     sponsorUrl:  'https://sponsor.example.com/sponsor',
-//     portalUrl:   'https://walrusforge.example.com',
+//     portalUrl:   'https://signet.example.com',
 //     llmProxyUrl: 'https://llm.example.com/llm',
 //     zkSaltUrl:   'https://salt.example.com/salt',
 //     zkProverUrl: 'https://prover.example.com/v1',

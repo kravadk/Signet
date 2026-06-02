@@ -1,4 +1,4 @@
-# WalrusForge indexer (events → SQLite → REST). node:18 glibc for node:sqlite.
+# Signet indexer (events → SQLite → REST). node:18 glibc for node:sqlite.
 # BUILD CONTEXT = repo root.
 FROM node:18
 WORKDIR /app
@@ -6,7 +6,7 @@ COPY server/package.json server/package-lock.json* ./server/
 RUN cd server && (npm ci || npm install)
 COPY server/src ./server/src
 COPY server/tsconfig.json ./server/tsconfig.json
-COPY move/walrusforge/deployments.json ./move/walrusforge/deployments.json
+COPY move/signet/deployments.json ./move/signet/deployments.json
 WORKDIR /app/server
 ENV PORT=4318
 ENV SUI_NETWORK=testnet

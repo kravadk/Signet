@@ -1,10 +1,10 @@
-/// WalrusForge — agent-native release network on Sui + Walrus.
+/// Signet — agent-native release network on Sui + Walrus.
 ///
 /// `forge` is the core module: it owns the shared registry, the `Repository`
 /// object (refs + provenance anchors), and the capability model that gates who
 /// can do what. Source code, diffs, reports and artifacts live in Walrus; this
 /// module stores only Walrus blob ids, hashes and permissions.
-module walrusforge::forge;
+module signet::forge;
 
 use std::string::String;
 use sui::event;
@@ -34,7 +34,7 @@ public fun scope_run_ci(): u8 { SCOPE_RUN_CI }
 
 // ===== Objects =====
 
-/// Shared registry of all repositories created through WalrusForge.
+/// Shared registry of all repositories created through Signet.
 /// `names` enforces globally-unique repo names for a clean demo namespace.
 public struct ForgeRegistry has key {
     id: UID,
@@ -164,8 +164,8 @@ public fun create_repo(
     );
 
     // Stand up the agent-reputation ledger alongside the repo.
-    walrusforge::reputation::share_ledger(
-        walrusforge::reputation::new_ledger(repo_id, ctx),
+    signet::reputation::share_ledger(
+        signet::reputation::new_ledger(repo_id, ctx),
     );
 
     transfer::share_object(repo);
@@ -267,7 +267,7 @@ public fun assert_not_agent_merge(_cap: &AgentCap) {
 
 // ===== Seal access policy (private agent memory / private repos) =====
 //
-// WalrusForge stores private agent memory (encrypted review notes, private repo
+// Signet stores private agent memory (encrypted review notes, private repo
 // snapshots) on Walrus, encrypted with Seal. Seal key servers call one of these
 // `seal_approve_*` functions with the encryption identity `id`; the call must
 // abort unless the requester holds a cap for the repo whose id namespaces `id`.

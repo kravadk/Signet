@@ -1,5 +1,5 @@
 /**
- * Walrus HTTP client for WalrusForge.
+ * Walrus HTTP client for Signet.
  *
  * Uses the public Walrus testnet publisher (writes) and aggregator (reads)
  * over plain HTTP — no wallet needed for public testnet services. Blobs are

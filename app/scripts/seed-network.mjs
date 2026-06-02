@@ -1,5 +1,5 @@
 /**
- * Seed the WalrusForge network with realistic activity so the dashboard reads as
+ * Seed the Signet network with realistic activity so the dashboard reads as
  * a living network with several repos, PRs and agents.
  *
  * Owner (CLI keystore) creates N repos; funds a few ephemeral agent identities;
@@ -78,7 +78,7 @@ const REPO_NAMES = [
 const fileFor = (name, n) => [
   { path: 'Move.toml', content: `[package]\nname = "${name}"\nedition = "2024"\n` },
   { path: 'sources/lib.move', content: `module demo::${name.replace(/-/g, '_')} {\n  public fun version(): u64 { ${n} }\n}\n` },
-  { path: 'README.md', content: `# ${name}\n\nSeeded WalrusForge repo (rev ${n}).\n` },
+  { path: 'README.md', content: `# ${name}\n\nSeeded Signet repo (rev ${n}).\n` },
 ];
 
 async function seedRepo(i, salt) {

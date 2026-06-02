@@ -1,4 +1,4 @@
-/// Playground apps for WalrusForge — agent-built apps published on-chain.
+/// Playground apps for Signet — agent-built apps published on-chain.
 ///
 /// A builder (human or AI agent) describes an app, an LLM generates it, and it is
 /// published here: the app bytes live in Walrus (referenced by `manifest_blob` /
@@ -7,7 +7,7 @@
 /// tamper-proof usage metrics (visits, stars, tips). Unlike a centralized gallery,
 /// every number here is on-chain and unfakeable, and `parent` forms a verifiable
 /// fork graph.
-module walrusforge::playground;
+module signet::playground;
 
 use std::string::String;
 use sui::balance::{Self, Balance};

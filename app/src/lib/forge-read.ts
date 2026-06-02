@@ -1,5 +1,5 @@
 /**
- * Read layer for WalrusForge (CLI/MCP side).
+ * Read layer for Signet (CLI/MCP side).
  *
  * Lists and fetches on-chain objects (repos, PRs, releases) by scanning package
  * events, and pulls the referenced Walrus blobs. Mirrors web/src/lib/forge.ts so

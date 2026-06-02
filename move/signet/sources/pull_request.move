@@ -1,15 +1,15 @@
-/// Pull requests and reviews for WalrusForge.
+/// Pull requests and reviews for Signet.
 ///
 /// A `PullRequest` proposes moving a repo's ref from a `base_snapshot` to a
 /// `head_snapshot` (both Walrus blob ids). Agents with the `open_pr` scope can
 /// create PRs; agents with the `review` scope can attach signed reviews. Only
 /// the repo owner can merge — merging updates the repo ref via `forge`.
-module walrusforge::pull_request;
+module signet::pull_request;
 
 use std::string::String;
 use sui::event;
-use walrusforge::forge::{Self, Repository, RepoOwnerCap, AgentCap};
-use walrusforge::reputation::{Self, RepoReputation};
+use signet::forge::{Self, Repository, RepoOwnerCap, AgentCap};
+use signet::reputation::{Self, RepoReputation};
 
 // ===== Errors =====
 

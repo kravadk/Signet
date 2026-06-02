@@ -1,4 +1,4 @@
-# WalrusForge — zkLogin salt service (backend P0)
+# Signet — zkLogin salt service (backend P0)
 
 Issues a **stable, per-user salt** so a zkLogin user's Sui address is the same on
 every login — **without a database**. The salt is `HMAC(SALT_SECRET, iss|aud|sub)`
@@ -19,7 +19,7 @@ Rotating `SALT_SECRET` rotates everyone's address, so set it once and keep it sa
 ```bash
 cd server/salt
 cp .env.example .env     # set SALT_SECRET (long random) + GOOGLE_CLIENT_ID
-npm start                # -> WalrusForge salt service on :8789
+npm start                # -> Signet salt service on :8789
 curl localhost:8789/health
 ```
 

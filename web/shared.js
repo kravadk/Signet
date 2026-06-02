@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — shared config, clients, state, helpers.
+   Signet — shared config, clients, state, helpers.
    Imported by app.js, data.js, wallet.js, ui.js so every module
    talks to the same SuiClient, CFG and STATE.
    ============================================================ */
@@ -7,7 +7,7 @@
 import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.18.0/client';
 import { formatAddress, MIST_PER_SUI, isValidSuiAddress, isValidSuiObjectId } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
 
-/* ---------- Config (per-network, mirrors move/walrusforge/deployments.json) ----------
+/* ---------- Config (per-network, mirrors move/signet/deployments.json) ----------
    Network picked from ?network= query param or localStorage 'wf.network', else testnet.
    Mainnet ids are filled in after `sui client publish` on mainnet. */
 const DEPLOYMENTS = {

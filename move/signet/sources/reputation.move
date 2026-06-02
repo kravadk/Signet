@@ -1,11 +1,11 @@
-/// Agent reputation for WalrusForge.
+/// Agent reputation for Signet.
 ///
 /// Each agent (or human) accrues a verifiable on-chain `AgentProfile` scoped to a
 /// repository: how many PRs they opened, how many got merged, how many reviews
 /// they submitted, and how many CI runs they reported. Counters are bumped only
 /// by sibling modules through `public(package)` hooks, so reputation cannot be
 /// forged — it is a side effect of real, signed actions.
-module walrusforge::reputation;
+module signet::reputation;
 
 use sui::table::{Self, Table};
 use sui::vec_set::{Self, VecSet};

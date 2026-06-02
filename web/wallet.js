@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — wallet connect + write actions (browser dApp).
+   Signet — wallet connect + write actions (browser dApp).
    Uses @mysten/wallet-standard for discovery/connect and
    @mysten/sui/transactions for PTBs. PTB builders mirror
    app/src/lib/sui.ts exactly. SuiNS reverse-lookup included.
@@ -64,7 +64,7 @@ async function doConnect(w) {
     // match the active network, txs will be rejected — tell the user how to fix it.
     const chains = account.chains || [];
     if (chains.length && !chains.includes(`sui:${CFG.network}`)) {
-      toast(`This wallet is on ${chains.join(', ').replace(/sui:/g, '')} — WalrusForge is on ${CFG.network}. Switch your wallet's network, or click the network badge to switch the app.`, { kind: 'info', timeout: 6000 });
+      toast(`This wallet is on ${chains.join(', ').replace(/sui:/g, '')} — Signet is on ${CFG.network}. Switch your wallet's network, or click the network badge to switch the app.`, { kind: 'info', timeout: 6000 });
     }
     await afterConnect();
   } catch (e) {

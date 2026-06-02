@@ -1,5 +1,5 @@
 /**
- * WalrusForge — zkLogin salt service (backend P0, no-wallet onboarding).
+ * Signet — zkLogin salt service (backend P0, no-wallet onboarding).
  *
  * Returns a STABLE, per-user salt for zkLogin so the user's Sui address is
  * deterministic across logins, WITHOUT a database: salt = HMAC(SALT_SECRET,

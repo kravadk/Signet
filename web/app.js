@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge Dashboard — bootstrap, routing, render.
+   Signet Dashboard — bootstrap, routing, render.
    Shared config/state/helpers live in shared.js; wallet + write
    actions in wallet.js; toast/search/settings UI in ui.js.
    ============================================================ */
@@ -588,7 +588,7 @@ async function loadData() {
   // network not deployed yet (e.g. mainnet before publish) — show a clear notice.
   if (!CFG_READY) {
     $('pkgShort').textContent = CFG.network + ' — not deployed';
-    const msg = '<div class="empty-state">WalrusForge is not yet deployed on <b>' + CFG.network +
+    const msg = '<div class="empty-state">Signet is not yet deployed on <b>' + CFG.network +
       '</b>. Switch to testnet (remove ?network=mainnet) or publish the package and fill its address.</div>';
     ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'issuesList', 'bountiesList', 'activityFeed', 'buyList', 'repList'].forEach((id) => { const el = $(id); if (el) el.innerHTML = msg; });
     ['statRepos', 'statPrs', 'statReleases', 'ovTotal'].forEach((id) => { const el = $(id); if (el) el.textContent = '—'; });
@@ -722,7 +722,7 @@ async function loadData() {
     tickLastUpdated();
     document.dispatchEvent(new CustomEvent('wf:data-loaded'));
   } catch (err) {
-    console.error('WalrusForge load failed:', err);
+    console.error('Signet load failed:', err);
     ['statRepos', 'statPrs', 'statReleases', 'ovTotal'].forEach(statError);
     $('delBody').innerHTML = '<tr><td colspan="5"><div class="empty-state err">Failed to reach Sui RPC.</div></td></tr>';
     $('buyList').innerHTML = '<div class="empty-state err">RPC unavailable.</div>';
@@ -1568,11 +1568,11 @@ function rerenderAll() {
   renderReleases(STATE.releases, repoNameById); renderReputation(STATE.reps);
 }
 
-/** Help & concepts modal: what WalrusForge is, a short glossary, the integrations,
+/** Help & concepts modal: what Signet is, a short glossary, the integrations,
     and quick links (in-app tabs + external docs). */
 function openHelp() {
   openModal({
-    title: 'WalrusForge — help & concepts',
+    title: 'Signet — help & concepts',
     wide: true,
     bodyHtml:
       '<p class="help-lead">Describe an app, an LLM builds it in your browser, and you publish it with ' +
@@ -1626,7 +1626,7 @@ function renderOnboarding() {
   const card = document.createElement('div');
   card.className = 'onboard';
   card.innerHTML =
-    '<div><h3>Welcome to WalrusForge 🦭</h3>' +
+    '<div><h3>Welcome to Signet 🔏</h3>' +
     '<p>An agent-native release network on Sui + Walrus. Humans connect a wallet and act in-browser; agents act via MCP — both bounded by the same on-chain capabilities. Every release has a verifiable provenance chain.</p></div>' +
     '<div class="onboard-cta">' +
     '<button class="btn-primary" id="obPlay">Open the Playground</button>' +
@@ -1650,7 +1650,7 @@ function renderFooter() {
   f.id = 'wfFooter';
   f.className = 'footer';
   f.innerHTML =
-    '<span class="foot-brand">WalrusForge</span>' +
+    '<span class="foot-brand">Signet</span>' +
     `<a target="_blank" rel="noreferrer" href="${explorerObject(CFG.packageId)}">Package ↗</a>` +
     '<a target="_blank" rel="noreferrer" href="https://docs.wal.app/">Walrus docs ↗</a>' +
     '<a target="_blank" rel="noreferrer" href="https://docs.sui.io/">Sui docs ↗</a>' +

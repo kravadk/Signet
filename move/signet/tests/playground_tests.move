@@ -1,5 +1,5 @@
 #[test_only]
-module walrusforge::playground_tests;
+module signet::playground_tests;
 
 use std::string;
 use std::option;
@@ -7,7 +7,7 @@ use sui::test_scenario::{Self as ts, Scenario};
 use sui::clock;
 use sui::coin;
 use sui::sui::SUI;
-use walrusforge::playground::{Self as pg, PublishedApp, StarRegistry, BuilderBoard, FlagRegistry, NameRegistry, Treasury, AppBounty, ForkRegistry, PrivacyRegistry};
+use signet::playground::{Self as pg, PublishedApp, StarRegistry, BuilderBoard, FlagRegistry, NameRegistry, Treasury, AppBounty, ForkRegistry, PrivacyRegistry};
 
 const BUILDER: address = @0xA;
 const VISITOR: address = @0xB;
@@ -88,7 +88,7 @@ fun test_star_increments() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::EAlreadyStarred)]
+#[expected_failure(abort_code = signet::playground::EAlreadyStarred)]
 fun test_double_star_aborts() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -107,7 +107,7 @@ fun test_double_star_aborts() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ECannotStarOwn)]
+#[expected_failure(abort_code = signet::playground::ECannotStarOwn)]
 fun test_star_own_aborts() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -268,7 +268,7 @@ fun test_flag_increments() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::EAlreadyFlagged)]
+#[expected_failure(abort_code = signet::playground::EAlreadyFlagged)]
 fun test_double_flag_aborts() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -304,7 +304,7 @@ fun test_builder_can_hide() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotBuilder)]
+#[expected_failure(abort_code = signet::playground::ENotBuilder)]
 fun test_non_builder_cannot_hide() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -338,7 +338,7 @@ fun test_update_app_rewrites_content() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotBuilder)]
+#[expected_failure(abort_code = signet::playground::ENotBuilder)]
 fun test_non_builder_cannot_update() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -373,7 +373,7 @@ fun test_claim_and_release_name() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENameTaken)]
+#[expected_failure(abort_code = signet::playground::ENameTaken)]
 fun test_name_taken_aborts() {
     let mut scen = setup();
     scen.next_tx(BUILDER);
@@ -436,7 +436,7 @@ fun test_admin_can_withdraw_treasury() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotAdmin)]
+#[expected_failure(abort_code = signet::playground::ENotAdmin)]
 fun test_non_admin_cannot_withdraw() {
     let mut scen = setup();
     scen.next_tx(VISITOR); // not the admin
@@ -488,7 +488,7 @@ fun test_post_and_award_bounty() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotPoster)]
+#[expected_failure(abort_code = signet::playground::ENotPoster)]
 fun test_non_poster_cannot_award() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -507,7 +507,7 @@ fun test_non_poster_cannot_award() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::EBountyClosed)]
+#[expected_failure(abort_code = signet::playground::EBountyClosed)]
 fun test_double_award_aborts() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -542,7 +542,7 @@ fun test_cancel_bounty_refunds() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::EZeroReward)]
+#[expected_failure(abort_code = signet::playground::EZeroReward)]
 fun test_zero_reward_bounty_aborts() {
     let mut scen = setup();
     scen.next_tx(TIPPER);
@@ -595,7 +595,7 @@ fun test_set_and_clear_fork_price() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotBuilder)]
+#[expected_failure(abort_code = signet::playground::ENotBuilder)]
 fun test_non_builder_cannot_set_price() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -647,7 +647,7 @@ fun test_pay_to_fork_pays_builder_minus_fee_and_refunds_excess() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotForkable)]
+#[expected_failure(abort_code = signet::playground::ENotForkable)]
 fun test_pay_to_fork_unpriced_aborts() {
     let mut scen = setup();
     publish_one(&mut scen); // no fork price set
@@ -666,7 +666,7 @@ fun test_pay_to_fork_unpriced_aborts() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::EUnderpaid)]
+#[expected_failure(abort_code = signet::playground::EUnderpaid)]
 fun test_pay_to_fork_underpaid_aborts() {
     let mut scen = setup();
     publish_one(&mut scen);
@@ -708,7 +708,7 @@ fun test_set_and_unset_private() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::playground::ENotBuilder)]
+#[expected_failure(abort_code = signet::playground::ENotBuilder)]
 fun test_non_builder_cannot_set_private() {
     let mut scen = setup();
     publish_one(&mut scen);

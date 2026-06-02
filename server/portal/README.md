@@ -1,4 +1,4 @@
-# WalrusForge — public portal
+# Signet — public portal
 
 Gives every published Playground app a **clean, human URL with rich link previews**, and a
 builder a `@handle` page — something a static SPA can't do (it can't emit per-app Open Graph
@@ -22,7 +22,7 @@ PUBLIC_ORIGIN=https://your.domain npm start   # :8790
 curl localhost:8790/health
 curl "localhost:8790/api/apps?limit=5"
 ```
-Network object ids come from `move/walrusforge/deployments.json` automatically.
+Network object ids come from `move/signet/deployments.json` automatically.
 
 ## Deploy
 Any Node 18+ host. Point a domain at it and set `PUBLIC_ORIGIN` so canonical/og URLs are right;

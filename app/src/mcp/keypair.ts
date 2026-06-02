@@ -1,5 +1,5 @@
 /**
- * Agent keypair loading for the WalrusForge MCP server.
+ * Agent keypair loading for the Signet MCP server.
  *
  * The MCP server signs as the *agent*, not the keystore owner. The agent's
  * private key is supplied via the FORGE_AGENT_KEY env var in bech32 form

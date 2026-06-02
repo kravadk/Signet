@@ -1,5 +1,5 @@
 /**
- * Snapshot + manifest helpers for WalrusForge.
+ * Snapshot + manifest helpers for Signet.
  *
  * A "snapshot" is a deterministic, gzipped archive of a repo directory plus a
  * `manifest.json` describing the file tree and content hashes. Both the archive

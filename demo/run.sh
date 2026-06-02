@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WalrusForge end-to-end demo (live Sui testnet + Walrus).
+# Signet end-to-end demo (live Sui testnet + Walrus).
 #
 # Runs the full agent-native release workflow as a single script:
 #   init -> grant agent -> agent opens PR -> CI worker tests+reviews ->

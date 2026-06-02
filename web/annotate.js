@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — lightweight UI annotator (local dev tool).
+   Signet — lightweight UI annotator (local dev tool).
 
    A no-dependency, vanilla replacement for Agentation (which needs
    React). Toggle annotate mode, click any element, leave a note;

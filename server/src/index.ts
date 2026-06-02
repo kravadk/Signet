@@ -1,5 +1,5 @@
 /**
- * WalrusForge indexer + REST API.
+ * Signet indexer + REST API.
  *
  * Polls the deployed package's Move events from Sui testnet, materialises them
  * into a local SQLite database, and serves a small REST API the web UI (and any
@@ -20,7 +20,7 @@ import { join, dirname } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const NET: "testnet" | "mainnet" = process.env.SUI_NETWORK === "mainnet" ? "mainnet" : "testnet";
 const deployment = JSON.parse(
-  readFileSync(join(__dirname, "..", "..", "move", "walrusforge", "deployments.json"), "utf8"),
+  readFileSync(join(__dirname, "..", "..", "move", "signet", "deployments.json"), "utf8"),
 )[NET];
 const PACKAGE: string = deployment.packageId;
 

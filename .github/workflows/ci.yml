@@ -55,11 +55,11 @@ jobs:
         run: sui --version
 
       - name: Build Move package
-        working-directory: move/walrusforge
+        working-directory: move/signet
         run: sui move build
 
       - name: Run Move tests
-        working-directory: move/walrusforge
+        working-directory: move/signet
         run: sui move test
 
   app:

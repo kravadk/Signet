@@ -1,4 +1,4 @@
-# WalrusForge
+# Signet
 
 <!-- After pushing to GitHub, replace OWNER/REPO below to activate the live badge. -->
 [![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
@@ -7,7 +7,7 @@
 
 Built for **Sui Overflow 2026** · primary track: **Walrus** · secondary: **Agentic Web**.
 
-WalrusForge is two products sharing one trust layer:
+Signet is two products sharing one trust layer:
 
 1. **Playground** — the front door. Describe an app, an LLM builds it in your browser, and you
    publish it to a public gallery where every number (visits, stars, tips, remix lineage,
@@ -163,7 +163,7 @@ Reputation and permissions are **contract checks, not server policy**:
 | NameRegistry · Treasury | `0xfd2c19e1…bc2acf1f` · `0x37be3e8a…45f82` |
 | ForkRegistry · PrivacyRegistry | `0x37f94756…d9aff6b7` · `0xe8603766…8ef19935` |
 
-Full ids for both networks (plus the upgrade chain) live in `move/walrusforge/deployments.json`
+Full ids for both networks (plus the upgrade chain) live in `move/signet/deployments.json`
 and `web/shared.js`.
 
 > **Events vs writes.** Event types keep the *original* package id where each module first
@@ -184,7 +184,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/walrusforge/      Sui Move contracts (the trust layer) — 7 modules, 46 tests
+move/signet/      Sui Move contracts (the trust layer) — 7 modules, 46 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -265,7 +265,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 
 ### Contracts
 ```sh
-cd move/walrusforge
+cd move/signet
 sui move test          # 46/46 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
@@ -283,10 +283,10 @@ Other, empty build command; `web/vercel.json` enables clean URLs.)
 
 ## CLI reference
 
-Installable as `@walrusforge/cli` (the package also ships the MCP server + an SDK):
+Installable as `@signet/cli` (the package also ships the MCP server + an SDK):
 ```sh
-npx @walrusforge/cli <command>      # zero-install
-npm i -g @walrusforge/cli && forge <command>   # or global `forge` / `walrusforge`
+npx @signet/cli <command>      # zero-install
+npm i -g @signet/cli && forge <command>   # or global `forge` / `signet`
 # from the repo: cd app && npm install && npm run forge -- <command>
 ```
 
@@ -311,7 +311,7 @@ npm i -g @walrusforge/cli && forge <command>   # or global `forge` / `walrusforg
 
 ## MCP server (agent-native)
 
-Agents drive WalrusForge through an MCP server that signs with the **agent's own key**, bounded
+Agents drive Signet through an MCP server that signs with the **agent's own key**, bounded
 by the agent's on-chain `AgentCap`. 16 tools:
 
 - **Read (no key):** `repo_list`, `repo_read_manifest`, `release_read`, `release_verify`,
@@ -323,9 +323,9 @@ by the agent's on-chain `AgentCap`. 16 tools:
 `merge` and `release` are **absent by design** — an agent can never call them.
 
 ```json
-{ "mcpServers": { "walrusforge": {
+{ "mcpServers": { "signet": {
   "command": "npx",
-  "args": ["-y", "-p", "@walrusforge/cli", "walrusforge-mcp"],
+  "args": ["-y", "-p", "@signet/cli", "signet-mcp"],
   "env": { "FORGE_AGENT_KEY": "suiprivkey1..." }
 }}}
 ```
@@ -335,10 +335,10 @@ proving the agent cannot exceed its delegated permissions.
 
 ## SDK
 
-The same primitives are importable from `@walrusforge/cli/sdk`:
+The same primitives are importable from `@signet/cli/sdk`:
 
 ```ts
-import { makeContext, verifyRelease, listRepos } from "@walrusforge/cli/sdk";
+import { makeContext, verifyRelease, listRepos } from "@signet/cli/sdk";
 
 const ctx = makeContext("testnet");
 const repos = await listRepos(ctx);

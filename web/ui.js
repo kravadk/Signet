@@ -1,5 +1,5 @@
 /* ============================================================
-   WalrusForge — UI primitives: toasts, copy, modal.
+   Signet — UI primitives: toasts, copy, modal.
    Pure DOM, no chain access. Imported by app.js and wallet.js.
    ============================================================ */
 

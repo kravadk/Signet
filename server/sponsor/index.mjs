@@ -1,5 +1,5 @@
 /**
- * WalrusForge — sponsored-transaction service (backend P0, onboarding accelerator).
+ * Signet — sponsored-transaction service (backend P0, onboarding accelerator).
  *
  * Lets a first-time user run gas-only Playground actions (record a visit, star,
  * flag, claim a handle, publish/update an app) WITHOUT holding any SUI — the

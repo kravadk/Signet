@@ -1,15 +1,15 @@
-/// Verifiable releases for WalrusForge — the provenance chain.
+/// Verifiable releases for Signet — the provenance chain.
 ///
 /// A `Release` ties together the full chain that a hackathon judge can verify:
 ///   source snapshot  ->  build artifact  ->  test report
 /// every element addressed by a Walrus blob id and anchored on Sui. Only the
 /// repo owner can publish a release, and publishing records the release id back
 /// onto the `Repository` as `latest_release`.
-module walrusforge::release;
+module signet::release;
 
 use std::string::String;
 use sui::event;
-use walrusforge::forge::{Self, Repository, RepoOwnerCap};
+use signet::forge::{Self, Repository, RepoOwnerCap};
 
 // ===== Objects =====
 

@@ -1,7 +1,7 @@
 /* ============================================================
-   WalrusForge — Dashboard
+   Signet — Dashboard
    Base UI recreated from the Modulix reference; extended with
-   WalrusForge-specific states (PR status, release chain, reputation).
+   Signet-specific states (PR status, release chain, reputation).
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');

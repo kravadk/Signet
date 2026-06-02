@@ -1,10 +1,10 @@
 /**
- * WalrusForge SDK — the programmatic surface over the on-chain release network
+ * Signet SDK — the programmatic surface over the on-chain release network
  * (Sui) and content storage (Walrus). Import it to read repos/PRs/releases,
  * verify a release's provenance chain, build/verify snapshots, and store/read
  * Walrus blobs — the same primitives the CLI and MCP server use.
  *
- *   import { verifyRelease, makeContext, listRepos } from "@walrusforge/cli/sdk";
+ *   import { verifyRelease, makeContext, listRepos } from "@signet/cli/sdk";
  *
  * (Consumed via tsx, a bundler, or after a build — the package ships TypeScript.)
  */

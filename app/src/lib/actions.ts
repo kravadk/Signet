@@ -1,5 +1,5 @@
 /**
- * High-level WalrusForge actions, shared by the MCP server (and reusable by the
+ * High-level Signet actions, shared by the MCP server (and reusable by the
  * CLI). Each returns a plain structured object — no console output — so callers
  * decide how to present results. Composes the lib + read layers.
  */

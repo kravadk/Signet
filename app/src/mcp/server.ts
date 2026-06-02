@@ -1,8 +1,8 @@
 #!/usr/bin/env -S npx tsx
 /**
- * WalrusForge MCP server (stdio).
+ * Signet MCP server (stdio).
  *
- * Exposes WalrusForge to AI agents as MCP tools. The agent signs with its own
+ * Exposes Signet to AI agents as MCP tools. The agent signs with its own
  * key (FORGE_AGENT_KEY) and acts only within its on-chain AgentCap scopes —
  * it can open PRs, review and upload artifacts, but never merge or publish a
  * release (those require the owner cap and are deliberately absent here).
@@ -72,7 +72,7 @@ function agentCtx() {
   return makeContextWithKeypair(requireAgentKey());
 }
 
-const server = new McpServer({ name: "walrusforge", version: "0.1.0" });
+const server = new McpServer({ name: "signet", version: "0.1.0" });
 
 // ===== Read tools (no signer needed) =====
 
@@ -80,7 +80,7 @@ server.registerTool(
   "repo_list",
   {
     title: "List repositories",
-    description: "List all WalrusForge repositories on Sui testnet.",
+    description: "List all Signet repositories on Sui testnet.",
     inputSchema: {},
   },
   async () => {
@@ -312,7 +312,7 @@ server.registerTool(
   "app_publish",
   {
     title: "Publish a Playground app",
-    description: "Publish a self-contained web app to the WalrusForge Playground gallery. Files are stored on Walrus and anchored on-chain (PublishedApp) with verifiable provenance. Pass `parent` to record a remix lineage. Requires a signer (FORGE_AGENT_KEY).",
+    description: "Publish a self-contained web app to the Signet Playground gallery. Files are stored on Walrus and anchored on-chain (PublishedApp) with verifiable provenance. Pass `parent` to record a remix lineage. Requires a signer (FORGE_AGENT_KEY).",
     inputSchema: {
       name: z.string().describe("kebab-case app name"),
       prompt: z.string().describe("the prompt/description that produced the app"),

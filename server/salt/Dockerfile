@@ -1,4 +1,4 @@
-# WalrusForge salt service — dependency-free (Node built-ins only). Context: server/salt
+# Signet salt service — dependency-free (Node built-ins only). Context: server/salt
 FROM node:18-alpine
 WORKDIR /app
 COPY package.json index.mjs lib.mjs ./

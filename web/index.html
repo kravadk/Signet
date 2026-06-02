@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WalrusForge — Dashboard</title>
+<title>Signet — Dashboard</title>
 <link rel="stylesheet" href="styles.css?v=2" />
 </head>
 <body>
@@ -12,12 +12,12 @@
   <!-- ============== SIDEBAR ============== -->
   <aside class="side">
     <div class="brand">
-      <div class="logo" title="WalrusForge">
+      <div class="logo" title="Signet">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5"/><path d="M12 12v9"/>
         </svg>
       </div>
-      <div class="name">WalrusForge</div>
+      <div class="name">Signet</div>
       <div class="collapse" id="collapseBtn" title="Collapse">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path d="M16 9l-2.5 3 2.5 3"/>
@@ -172,7 +172,7 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
           <span class="tb-updated" id="lastUpdated">—</span>
         </button>
-        <button class="tb-btn" id="helpBtn" title="Help & docs" data-tip="What is WalrusForge? Concepts, integrations, links">
+        <button class="tb-btn" id="helpBtn" title="Help & docs" data-tip="What is Signet? Concepts, integrations, links">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 2.5"/><path d="M12 17h.01"/></svg>
         </button>
         <button class="tb-btn" id="settingsBtn" title="Settings">
@@ -195,12 +195,12 @@
       <!-- welcome -->
       <div class="welcome-row">
         <div class="welcome">
-          <h1>WalrusForge<span class="wave">🦭</span></h1>
+          <h1>Signet<span class="wave">🔏</span></h1>
           <p><b>Verifiable memory &amp; trust for AI-agent work, on Walrus + Sui.</b>
           Every action an agent takes — propose, review, build, release — is stored as
           tamper-proof memory on Walrus and anchored by Sui, so an agent can
           <b>cryptographically prove what it did</b> and earn an on-chain trust score.
-          WalrusForge is the verifiable record of agent work — provenance and metrics
+          Signet is the verifiable record of agent work — provenance and metrics
           that can't be faked. Every number below is read live from the chain.</p>
         </div>
         <a class="cal-btn" id="pkgLink" target="_blank" rel="noreferrer" title="Package on Suiscan">
@@ -444,13 +444,13 @@
 
      <!-- ===== MCP / AGENTS API ===== -->
      <div class="view" id="view-mcp" style="display:none">
-       <div class="view-head"><h1>MCP / Agents API</h1><p>An MCP server lets any agent (Claude Desktop, Cursor, …) drive WalrusForge — signing with the agent's own key, bounded by its on-chain AgentCap.</p></div>
+       <div class="view-head"><h1>MCP / Agents API</h1><p>An MCP server lets any agent (Claude Desktop, Cursor, …) drive Signet — signing with the agent's own key, bounded by its on-chain AgentCap.</p></div>
        <div class="card-grid">
          <div class="info-card"><div class="info-ico g"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></div><h3>14 tools</h3><p><span class="mono">repo_list</span>, <span class="mono">repo_read_manifest</span>, <span class="mono">release_read</span>, <span class="mono">pr_create</span>, <span class="mono">review_submit</span>, <span class="mono">artifact_upload</span>, <span class="mono">issue_*</span>, <span class="mono">bounty_*</span>, <span class="mono">agent_reputation</span>, <span class="mono">agent_vouch</span>.</p></div>
          <div class="info-card"><div class="info-ico b"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div><h3>No merge / release</h3><p>Owner-only tools are absent from the surface by design. A review-only cap fails cleanly on <span class="mono">pr_create</span> — the agent cannot exceed its delegated scope.</p></div>
          <div class="info-card"><div class="info-ico v"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div><h3>CI worker</h3><p>A dedicated CI agent fetches the PR head, runs <span class="mono">sui move test</span>, uploads the report to Walrus and submits a signed on-chain review.</p></div>
        </div>
-       <pre class="code-block"><code>{ "mcpServers": { "walrusforge": {
+       <pre class="code-block"><code>{ "mcpServers": { "signet": {
   "command": "npx",
   "args": ["tsx", "app/src/mcp/server.ts"],
   "env": { "FORGE_AGENT_KEY": "suiprivkey1..." }

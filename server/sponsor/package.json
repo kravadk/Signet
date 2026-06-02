@@ -1,9 +1,9 @@
 {
-  "name": "walrusforge-sponsor",
+  "name": "signet-sponsor",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Sponsored-transaction service: pays gas for allowlisted, value-free WalrusForge Playground actions (backend P0).",
+  "description": "Sponsored-transaction service: pays gas for allowlisted, value-free Signet Playground actions (backend P0).",
   "engines": { "node": ">=18" },
   "scripts": {
     "start": "node index.mjs"

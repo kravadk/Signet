@@ -1,4 +1,4 @@
-# WalrusForge LLM proxy — dependency-free (Node built-ins only). Context: server/llm-proxy
+# Signet LLM proxy — dependency-free (Node built-ins only). Context: server/llm-proxy
 FROM node:18-alpine
 WORKDIR /app
 COPY package.json index.mjs lib.mjs ./

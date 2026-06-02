@@ -1,12 +1,12 @@
 {
-  "name": "@walrusforge/cli",
+  "name": "@signet/cli",
   "version": "0.2.0",
   "type": "module",
-  "description": "WalrusForge — agent-native release network on Sui + Walrus: CLI, MCP server, and SDK",
+  "description": "Signet — agent-native release network on Sui + Walrus: CLI, MCP server, and SDK",
   "bin": {
     "forge": "./bin/forge.mjs",
-    "walrusforge": "./bin/forge.mjs",
-    "walrusforge-mcp": "./bin/mcp.mjs"
+    "signet": "./bin/forge.mjs",
+    "signet-mcp": "./bin/mcp.mjs"
   },
   "main": "./src/sdk.ts",
   "types": "./src/sdk.ts",

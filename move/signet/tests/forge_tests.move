@@ -1,16 +1,16 @@
 #[test_only]
-module walrusforge::forge_tests;
+module signet::forge_tests;
 
 use std::string;
 use sui::test_scenario::{Self as ts, Scenario};
 use sui::coin;
 use sui::sui::SUI;
-use walrusforge::forge::{Self, ForgeRegistry, Repository, RepoOwnerCap, AgentCap};
-use walrusforge::reputation::{Self, RepoReputation};
-use walrusforge::pull_request::{Self as pr, PullRequest};
-use walrusforge::release::{Self, Release};
-use walrusforge::issue::{Self, Issue};
-use walrusforge::bounty::{Self, Bounty};
+use signet::forge::{Self, ForgeRegistry, Repository, RepoOwnerCap, AgentCap};
+use signet::reputation::{Self, RepoReputation};
+use signet::pull_request::{Self as pr, PullRequest};
+use signet::release::{Self, Release};
+use signet::issue::{Self, Issue};
+use signet::bounty::{Self, Bounty};
 
 const OWNER: address = @0xA;
 const AGENT: address = @0xB;
@@ -109,7 +109,7 @@ fun test_agent_can_open_pr_with_scope() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::forge::ECapMissingScope)]
+#[expected_failure(abort_code = signet::forge::ECapMissingScope)]
 fun test_agent_without_pr_scope_cannot_open_pr() {
     let mut scen = setup();
     scen.next_tx(OWNER);
@@ -134,7 +134,7 @@ fun test_agent_without_pr_scope_cannot_open_pr() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::forge::ECapExpired)]
+#[expected_failure(abort_code = signet::forge::ECapExpired)]
 fun test_expired_cap_cannot_open_pr() {
     let mut scen = setup();
     scen.next_tx(OWNER);
@@ -161,7 +161,7 @@ fun test_expired_cap_cannot_open_pr() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::forge::ECapRevoked)]
+#[expected_failure(abort_code = signet::forge::ECapRevoked)]
 fun test_revoked_cap_cannot_open_pr() {
     let mut scen = setup();
     grant_pr_review_cap(&mut scen);
@@ -273,7 +273,7 @@ fun test_full_provenance_chain_and_reputation() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::pull_request::EBaseStale)]
+#[expected_failure(abort_code = signet::pull_request::EBaseStale)]
 fun test_stale_merge_aborts() {
     let mut scen = setup();
     grant_pr_review_cap(&mut scen);
@@ -408,7 +408,7 @@ fun test_bounty_cancel_refunds() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::bounty::ENotFunder)]
+#[expected_failure(abort_code = signet::bounty::ENotFunder)]
 fun test_bounty_only_funder_approves() {
     let mut scen = setup();
     scen.next_tx(FUNDER);
@@ -510,7 +510,7 @@ fun test_vouch_raises_score() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::reputation::EVouchScoreTooLow)]
+#[expected_failure(abort_code = signet::reputation::EVouchScoreTooLow)]
 fun test_low_score_cannot_vouch() {
     let mut scen = setup();
     // FUNDER has zero score, tries to vouch -> abort.
@@ -524,7 +524,7 @@ fun test_low_score_cannot_vouch() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::reputation::EVouchSelf)]
+#[expected_failure(abort_code = signet::reputation::EVouchSelf)]
 fun test_cannot_vouch_self() {
     let mut scen = setup();
     earn_score(&mut scen);
@@ -538,7 +538,7 @@ fun test_cannot_vouch_self() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::pull_request::ENotEnoughApprovals)]
+#[expected_failure(abort_code = signet::pull_request::ENotEnoughApprovals)]
 fun test_merge_blocked_below_min_approvals() {
     let mut scen = setup();
     grant_pr_review_cap(&mut scen);
@@ -648,7 +648,7 @@ fun test_set_min_approvals_sets_value() {
 }
 
 #[test]
-#[expected_failure(abort_code = walrusforge::bounty::EScoreTooLow)]
+#[expected_failure(abort_code = signet::bounty::EScoreTooLow)]
 fun test_bounty_score_lock_blocks_low_score() {
     let mut scen = setup();
     // Funder posts a bounty requiring score >= 5.
