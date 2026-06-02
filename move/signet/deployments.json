@@ -2,6 +2,8 @@
   "testnet": {
     "chainId": "4c78adac",
     "packageId": "0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1",
+    "mvrName": "@signet/forge",
+    "mvrNote": "Intended Move Registry (MVR) alias. Register via mvr / moveregistry.com under a testnet SuiNS name you own, pointing to packageId. Until registered, all calls use the raw packageId — MVR is additive, never required.",
     "forgeRegistry": "0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02",
     "upgradeCap": "0x699bc418a6b32892904c4c09b165c0b2f56a13cab320fdf81f200564f62f92f4",
     "publishTx": "6qxmqi9nTQ1SUfZf4VqH3pH4a7HkssPyVyGx4QbX4HhF",
@@ -39,6 +41,8 @@
   "mainnet": {
     "chainId": "35834a8a",
     "packageId": "0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54",
+    "mvrName": "@signet/forge",
+    "mvrNote": "Intended Move Registry (MVR) alias. Register via mvr / moveregistry.com under a mainnet SuiNS name you own, pointing to packageId. Until registered, all calls use the raw packageId — MVR is additive, never required.",
     "forgeRegistry": "0xc33128b32c015cf010116499d87bebb9899aec410b790902bf6208b992fa2071",
     "upgradeCap": "0xdfb585f0ee176fe2a4f58d8ab8f84adabeb706e71beee855537b023070751605",
     "publishTx": "7Um2fePJjJnaLXwbiQ8Jbv3z4nBp5TApb4MQFm7Ur7Ne",

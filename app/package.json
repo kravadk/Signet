@@ -23,6 +23,7 @@
     "seed": "node --import tsx scripts/seed-network.mjs",
     "doctor": "tsx src/cli/index.ts doctor",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/snapshot.test.ts",
     "prepublishOnly": "tsc --noEmit",
     "pack:dry": "npm pack --dry-run"
   },
@@ -45,9 +46,9 @@
     "reputation"
   ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/OWNER/REPO.git", "directory": "app" },
-  "homepage": "https://github.com/OWNER/REPO#readme",
-  "bugs": "https://github.com/OWNER/REPO/issues",
+  "repository": { "type": "git", "url": "https://github.com/kravadk/signet.git", "directory": "app" },
+  "homepage": "https://github.com/kravadk/signet#readme",
+  "bugs": "https://github.com/kravadk/signet/issues",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mysten/sui": "^1.30.0",

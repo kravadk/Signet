@@ -63,7 +63,7 @@ jobs:
         run: sui move test
 
   app:
-    name: App (TypeScript typecheck)
+    name: App (typecheck + unit tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +81,10 @@ jobs:
       - name: Typecheck
         working-directory: app
         run: npm run typecheck
+
+      - name: Unit tests (snapshot/treeHash integrity core)
+        working-directory: app
+        run: npm test
 
   # Read-only provenance check against the live testnet network. No keys needed
   # (verify never signs). This is an INFORMATIONAL signal, not a hard gate:

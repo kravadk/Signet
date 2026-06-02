@@ -166,6 +166,12 @@ Reputation and permissions are **contract checks, not server policy**:
 Full ids for both networks (plus the upgrade chain) live in `move/signet/deployments.json`
 and `web/shared.js`.
 
+**Move Registry (MVR):** the package is published under the intended alias `@signet/forge`
+(`mvrName` in `deployments.json`). Once registered against a SuiNS name via
+[moveregistry.com](https://www.moveregistry.com), tooling can target
+`@signet/forge::forge::create_repo` instead of the raw `0x…` id. MVR is additive —
+everything works today with the raw package id.
+
 > **Events vs writes.** Event types keep the *original* package id where each module first
 > appeared, so the gallery reads `AppPublished`/`BuilderScored`/… under `playgroundEventPkg`
 > while writes target the latest upgrade (`playgroundPackageId`). Both ids are in the config.
@@ -184,7 +190,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/signet/      Sui Move contracts (the trust layer) — 7 modules, 46 tests
+move/signet/      Sui Move contracts (the trust layer) — 7 modules, 53 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -266,7 +272,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 ### Contracts
 ```sh
 cd move/signet
-sui move test          # 46/46 pass
+sui move test          # 53/53 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
 
@@ -453,7 +459,7 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Tech stack
 
-- **Contracts:** Sui Move (edition 2024), 7 modules, 46 tests; Seal access policy.
+- **Contracts:** Sui Move (edition 2024), 7 modules, 53 tests; Seal access policy.
 - **Storage:** Walrus (HTTP publisher/aggregator on testnet; `@mysten/walrus` SDK for owned blobs).
 - **App layer:** TypeScript — CLI (commander), `@mysten/sui` SDK, MCP server (stdio), CI worker,
   optional SQLite indexer.
@@ -477,7 +483,7 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Project status
 
-- ✅ **Contracts (v7)** live on **testnet + mainnet**; 46/46 tests.
+- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps); 53/53 tests.
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (16 tools) + CLI (14 commands).

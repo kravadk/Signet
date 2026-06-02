@@ -194,8 +194,20 @@ async function pollOnce() {
 // ===== REST API =====
 
 const app = express();
+// This API is a REBUILDABLE CACHE, never the source of truth. Every row carries its
+// on-chain object id (`id`) plus Walrus blob ids (snapshot / source / artifact / report),
+// so any client can re-verify each value against Sui RPC + Walrus and never has to trust
+// the indexer. The header advertises that contract on every response.
+app.use((_req, res, next) => {
+  res.setHeader("X-Signet-Source", "indexer-cache; reverify against Sui RPC + Walrus");
+  next();
+});
 app.get("/api/health", (_req, res) =>
-  res.status(ready ? 200 : 503).json({ ok: ready, package: PACKAGE, network: NET }));
+  res.status(ready ? 200 : 503).json({
+    ok: ready, package: PACKAGE, network: NET,
+    source: "indexer-cache",
+    reverify: "rebuildable cache — verify object ids on Sui RPC + blob ids on Walrus (chain is source of truth)",
+  }));
 app.get("/api/repos", (_req, res) => res.json(db.prepare(`SELECT * FROM repos`).all()));
 app.get("/api/repos/:id", (req, res) => {
   const repo = db.prepare(`SELECT * FROM repos WHERE id=?`).get(req.params.id);

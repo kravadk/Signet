@@ -174,14 +174,23 @@ export async function verifyRelease(releaseId: string): Promise<VerifyResult> {
   let reviewedOk = false;
   let chainDetail = "no merged PR matched the release source";
   try {
-    const merged = await _vClient.queryEvents({
-      query: { MoveEventType: `${_vPkg}::pull_request::PrMerged` },
-      limit: 100, order: "descending",
-    });
-    const prIds = merged.data
-      .filter((e) => (e.parsedJson as any)?.repo_id === rel.repoId)
-      .map((e) => (e.parsedJson as any)?.pr_id)
-      .filter(Boolean) as string[];
+    // Cursor-paginate PrMerged so a release's PR isn't missed when the repo has
+    // more than one page of merges (correctness, not just the most-recent page).
+    const prIds: string[] = [];
+    let cursor: any = null;
+    do {
+      const page = await _vClient.queryEvents({
+        query: { MoveEventType: `${_vPkg}::pull_request::PrMerged` },
+        cursor, limit: 50, order: "descending",
+      });
+      for (const e of page.data) {
+        if ((e.parsedJson as any)?.repo_id !== rel.repoId) continue;
+        const id = (e.parsedJson as any)?.pr_id;
+        if (id) prIds.push(id as string);
+      }
+      cursor = page.nextCursor;
+      if (!page.hasNextPage || prIds.length >= 500) break;
+    } while (cursor);
     for (const prId of prIds) {
       const pr = await getPullRequest(prId).catch(() => null);
       if (!pr) continue;

@@ -18,6 +18,27 @@ const deployment = loadDeployment(NETWORK);
 const PACKAGE = deployment.packageId;
 const client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 
+/**
+ * Paginate an event query across ALL pages (cursor loop) so lists aren't silently
+ * capped at one page. `max` is a safety backstop against an unbounded log.
+ */
+async function queryAllEvents(
+  query: any,
+  { order = "descending", max = 1000, pageLimit = 50 }: { order?: "ascending" | "descending"; max?: number; pageLimit?: number } = {},
+): Promise<any[]> {
+  const out: any[] = [];
+  let cursor: any = null;
+  do {
+    let page;
+    try { page = await client.queryEvents({ query, cursor, limit: pageLimit, order }); }
+    catch { break; }
+    out.push(...page.data);
+    cursor = page.nextCursor;
+    if (!page.hasNextPage || out.length >= max) break;
+  } while (cursor);
+  return out;
+}
+
 export interface Repo {
   id: string;
   name: string;
@@ -70,12 +91,8 @@ export async function getRepo(id: string): Promise<Repo | null> {
 }
 
 export async function listRepos(limit = 50): Promise<Repo[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE}::forge::RepoCreated` },
-    limit,
-    order: "descending",
-  });
-  const ids = events.data
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::forge::RepoCreated` }, { pageLimit: limit });
+  const ids = data
     .map((e) => (e.parsedJson as any)?.repo_id)
     .filter(Boolean) as string[];
   const repos = await Promise.all(ids.map((id) => getRepo(id).catch(() => null)));
@@ -116,12 +133,8 @@ export async function getRelease(id: string): Promise<Release | null> {
 
 /** List releases for a repo by scanning ReleasePublished events. */
 export async function listReleases(repoId: string, limit = 50): Promise<Release[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE}::release::ReleasePublished` },
-    limit,
-    order: "descending",
-  });
-  const ids = events.data
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::release::ReleasePublished` }, { pageLimit: limit });
+  const ids = data
     .filter((e) => (e.parsedJson as any)?.repo_id === repoId)
     .map((e) => (e.parsedJson as any)?.release_id)
     .filter(Boolean) as string[];
@@ -170,12 +183,8 @@ export interface Bounty {
 }
 
 export async function listIssues(repoId: string, limit = 50): Promise<Issue[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE}::issue::IssueOpened` },
-    limit,
-    order: "descending",
-  });
-  const ids = events.data
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::issue::IssueOpened` }, { pageLimit: limit });
+  const ids = data
     .filter((e) => (e.parsedJson as any)?.repo_id === repoId)
     .map((e) => (e.parsedJson as any)?.issue_id)
     .filter(Boolean) as string[];
@@ -199,12 +208,8 @@ export async function getIssue(id: string): Promise<Issue | null> {
 }
 
 export async function listBounties(repoId: string, limit = 50): Promise<Bounty[]> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE}::bounty::BountyPosted` },
-    limit,
-    order: "descending",
-  });
-  const ids = events.data
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::bounty::BountyPosted` }, { pageLimit: limit });
+  const ids = data
     .filter((e) => (e.parsedJson as any)?.repo_id === repoId)
     .map((e) => (e.parsedJson as any)?.bounty_id)
     .filter(Boolean) as string[];
@@ -245,12 +250,8 @@ export async function fetchManifest(blobId: string): Promise<Manifest | null> {
  * tx as the repo (RepoCreated event), so we read that tx's object changes.
  */
 export async function findReputationLedger(repoId: string): Promise<string | null> {
-  const events = await client.queryEvents({
-    query: { MoveEventType: `${PACKAGE}::forge::RepoCreated` },
-    limit: 100,
-    order: "descending",
-  });
-  const ev = events.data.find((e) => (e.parsedJson as any)?.repo_id === repoId);
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::forge::RepoCreated` });
+  const ev = data.find((e) => (e.parsedJson as any)?.repo_id === repoId);
   if (!ev) return null;
   const digest = ev.id.txDigest;
   const tx = await client.getTransactionBlock({ digest, options: { showObjectChanges: true } });

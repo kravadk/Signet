@@ -333,6 +333,8 @@ program
     let pkgOk = false;
     try { const o = await ctx.client.getObject({ id: pkg, options: { showType: true } }); pkgOk = !!o.data; } catch {}
     console.log(`  [${ok(pkgOk)}] package       ${pkg}${pkgOk ? "" : "   → fix: check deployments.json / network"}`);
+    const mvr = (ctx.deployment as any).mvrName;
+    if (mvr) console.log(`  [·] mvr alias     ${mvr}   (register via SuiNS to activate; raw id works today)`);
     let regOk = false;
     try { const o = await ctx.client.getObject({ id: ctx.deployment.forgeRegistry, options: { showContent: true } }); regOk = !!o.data; } catch {}
     console.log(`  [${ok(regOk)}] registry      ${ctx.deployment.forgeRegistry}`);

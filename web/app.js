@@ -55,12 +55,24 @@ async function getRepo(id) {
   return parseRepo(fields(obj), id);
 }
 
-async function listRepos(limit = 50) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::forge::RepoCreated` },
-    limit, order: 'descending',
-  });
-  const ids = ev.data.map((e) => e.parsedJson?.repo_id).filter(Boolean);
+/* Paginate an event query across ALL pages (cursor loop) so lists aren't silently
+   capped at one page. `max` is a safety backstop against an unbounded log. */
+async function queryAllEvents(query, { order = 'descending', max = 1000, pageLimit = 50 } = {}) {
+  const out = []; let cursor = null;
+  do {
+    let page;
+    try { page = await sui.queryEvents({ query, cursor, limit: pageLimit, order }); }
+    catch { break; }
+    out.push(...page.data);
+    cursor = page.nextCursor;
+    if (!page.hasNextPage || out.length >= max) break;
+  } while (cursor);
+  return out;
+}
+
+async function listRepos() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::forge::RepoCreated` });
+  const ids = data.map((e) => e.parsedJson?.repo_id).filter(Boolean);
   return multiGet(ids, parseRepo);
 }
 
@@ -77,12 +89,9 @@ async function getPullRequest(id) {
   return parsePr(fields(obj), id);
 }
 
-async function listAllPullRequests(limit = 50) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::pull_request::PrOpened` },
-    limit, order: 'descending',
-  });
-  const ids = ev.data.map((e) => e.parsedJson?.pr_id).filter(Boolean);
+async function listAllPullRequests() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::pull_request::PrOpened` });
+  const ids = data.map((e) => e.parsedJson?.pr_id).filter(Boolean);
   return multiGet(ids, parsePr);
 }
 
@@ -98,22 +107,16 @@ async function getRelease(id) {
   return parseRelease(fields(obj), id);
 }
 
-async function listAllReleases(limit = 50) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::release::ReleasePublished` },
-    limit, order: 'descending',
-  });
-  const ids = ev.data.map((e) => e.parsedJson?.release_id).filter(Boolean);
+async function listAllReleases() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::release::ReleasePublished` });
+  const ids = data.map((e) => e.parsedJson?.release_id).filter(Boolean);
   return multiGet(ids, parseRelease);
 }
 
-async function listAllReputation(limit = 200) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::reputation::ReputationUpdated` },
-    limit, order: 'descending',
-  });
+async function listAllReputation() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::reputation::ReputationUpdated` }, { max: 2000 });
   const seen = new Map();
-  for (const e of ev.data) {
+  for (const e of data) {
     const p = e.parsedJson;
     if (!p?.agent || seen.has(p.agent)) continue; // newest wins (desc)
     seen.set(p.agent, {
@@ -126,14 +129,14 @@ async function listAllReputation(limit = 200) {
 }
 
 /** Map recipient address -> their AgentCap grant (scope/expiry/revoked). */
-async function listAgentCaps(limit = 100) {
+async function listAgentCaps() {
   const [grants, revokes] = await Promise.all([
-    sui.queryEvents({ query: { MoveEventType: `${CFG.packageId}::forge::AgentCapGranted` }, limit, order: 'descending' }).catch(() => ({ data: [] })),
-    sui.queryEvents({ query: { MoveEventType: `${CFG.packageId}::forge::AgentCapRevoked` }, limit, order: 'descending' }).catch(() => ({ data: [] })),
+    queryAllEvents({ MoveEventType: `${CFG.packageId}::forge::AgentCapGranted` }),
+    queryAllEvents({ MoveEventType: `${CFG.packageId}::forge::AgentCapRevoked` }),
   ]);
-  const revoked = new Set(revokes.data.map((e) => e.parsedJson?.cap_id).filter(Boolean));
+  const revoked = new Set(revokes.map((e) => e.parsedJson?.cap_id).filter(Boolean));
   const byAgent = new Map(); // recipient -> {capId, scopes, expires, repoId, revoked}
-  for (const e of grants.data) {
+  for (const e of grants) {
     const p = e.parsedJson; if (!p?.recipient || byAgent.has(p.recipient)) continue;
     byAgent.set(p.recipient, {
       capId: p.cap_id, scopes: Number(p.scopes), expires: Number(p.expires_at_epoch),
@@ -155,12 +158,9 @@ async function getIssue(id) {
   return parseIssue(fields(obj), id);
 }
 
-async function listAllIssues(limit = 50) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::issue::IssueOpened` },
-    limit, order: 'descending',
-  });
-  const ids = ev.data.map((e) => e.parsedJson?.issue_id).filter(Boolean);
+async function listAllIssues() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::issue::IssueOpened` });
+  const ids = data.map((e) => e.parsedJson?.issue_id).filter(Boolean);
   return multiGet(ids, parseIssue);
 }
 
@@ -179,12 +179,9 @@ async function getBounty(id) {
   return parseBounty(fields(obj), id);
 }
 
-async function listAllBounties(limit = 50) {
-  const ev = await sui.queryEvents({
-    query: { MoveEventType: `${CFG.packageId}::bounty::BountyPosted` },
-    limit, order: 'descending',
-  });
-  const ids = ev.data.map((e) => e.parsedJson?.bounty_id).filter(Boolean);
+async function listAllBounties() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::bounty::BountyPosted` });
+  const ids = data.map((e) => e.parsedJson?.bounty_id).filter(Boolean);
   return multiGet(ids, parseBounty);
 }
 
@@ -333,20 +330,18 @@ function renderVerifyResult(host, result) {
 }
 
 /** Per-module event counts + daily buckets for the chart + a flat feed. */
-async function listActivity(limit = 100) {
+async function listActivity() {
   const mods = ['forge', 'pull_request', 'issue', 'bounty', 'release', 'reputation'];
   const perMod = {};
   let total = 0;
   const tsBuckets = new Map(); // epochMs(day) -> count
   const feed = [];
   for (const m of mods) {
-    const ev = await sui.queryEvents({
-      query: { MoveModule: { package: CFG.packageId, module: m } },
-      limit, order: 'descending',
-    }).catch(() => ({ data: [] }));
-    perMod[m] = ev.data.length;
-    total += ev.data.length;
-    for (const e of ev.data) {
+    // Cursor-paginated per module (capped) so counts/feed aren't silently truncated.
+    const data = await queryAllEvents({ MoveModule: { package: CFG.packageId, module: m } }, { max: 500 });
+    perMod[m] = data.length;
+    total += data.length;
+    for (const e of data) {
       const t = Number(e.timestampMs || 0);
       feed.push({
         type: e.type.split('::').slice(-1)[0],
