@@ -228,7 +228,6 @@ web/                   Static SPA — no backend, no build step (ES modules via 
   ui.js / styles.css     toasts/modals + theme (Sui blue; Plus Jakarta Sans + JetBrains Mono)
 
 demo/run.sh            one-command live end-to-end (init→PR→CI→merge→release)
-docs/                  PRODUCT-ROADMAP, DEMO-SCRIPT, COMPETITOR-ANALYSIS, ARCHITECTURE-FIXES …
 ```
 
 ---
@@ -488,12 +487,7 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 - ⚠️ A human-readable `*.wal.app` per-app URL needs a public portal / SuiNS (the verifiable
   viewer share-URL already works).
 
-See `docs/PRODUCT-ROADMAP.md` for the full demo → product breakdown.
-
 ---
 
 ## Docs
-- `docs/PRODUCT-ROADMAP.md` — demo → product roadmap, priorities, what's done.
-- `docs/DEMO-SCRIPT.md` — the recorded-demo walkthrough.
-- `docs/ARCHITECTURE-FIXES.md` — known architectural decisions & fixes.
 - `server/*/README.md` — per-service setup for the onboarding accelerators.

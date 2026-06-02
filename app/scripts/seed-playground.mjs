@@ -1,6 +1,6 @@
 /**
  * Seed the Playground gallery with a few published apps so the gallery + portal
- * aren't a ghost town. Mirrors seed-one-clean.mjs: snapshot → Walrus → publish_app_v2.
+ * aren't empty. Mirrors seed-one-clean.mjs: snapshot → Walrus → publish_app_v2.
  *
  * Key: FORGE_SEED_KEY (a funded testnet suiprivkey, from the gitignored .env).
  * Net: FORGE_NETWORK (testnet | mainnet; testnet uses the free Walrus publisher).

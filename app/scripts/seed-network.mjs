@@ -1,6 +1,6 @@
 /**
  * Seed the WalrusForge network with realistic activity so the dashboard reads as
- * a living network, not a one-repo ghost town.
+ * a living network with several repos, PRs and agents.
  *
  * Owner (CLI keystore) creates N repos; funds a few ephemeral agent identities;
  * grants them AgentCaps; agents open PRs + reviews via the same PTB builders the

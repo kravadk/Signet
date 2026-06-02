@@ -2,7 +2,7 @@
    WalrusForge — Playground: chat → AI builds an app → live
    preview → publish to Sui+Walrus → gallery → remix.
 
-   Sui-native analog of Gitlawb's playground. The compelling loop:
+   The compelling loop:
    type a prompt, a real LLM builds a self-contained app, you see
    it live, publish it on-chain (verifiable provenance), it lands
    in a public gallery with on-chain visits/stars and a remix graph.
