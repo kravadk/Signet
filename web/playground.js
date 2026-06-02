@@ -726,10 +726,10 @@ export function renderGallery() {
   grid.innerHTML = apps.map((a) => `
     <div class="pg-card" data-app="${a.id}">
       <div class="pg-card-head">
-        <span class="pg-card-name">${escapeHtml(a.name)}</span>
+        <span class="pg-card-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
         <span class="pg-cat">${escapeHtml(a.category)}</span>
       </div>
-      <div class="pg-prompt">${escapeHtml(a.prompt)}</div>
+      <div class="pg-prompt" title="${escapeHtml(a.prompt)}">${escapeHtml(a.prompt)}</div>
       <div class="pg-card-meta">
         <span class="pg-by">by <button class="pg-builder" data-act="profile" data-builder="${a.builder}">${escapeHtml(displayName(a.builder))}</button></span>
         ${a.parent ? '<span class="pg-lineage" title="remixed from another app">⑂ remix</span>' : ''}

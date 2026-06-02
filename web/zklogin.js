@@ -116,6 +116,10 @@ export async function restoreZkLogin() {
     const { epoch } = await sui.getLatestSuiSystemState();
     if (Number(epoch) > s.maxEpoch) { zkLogout(); return false; } // proof expired
     activateSession(s);
+    // Warn just before expiry so a tx doesn't fail mid-signing on an epoch rollover.
+    if (Number(epoch) >= s.maxEpoch) {
+      toast('Your zkLogin session expires this epoch — sign out and back in to refresh it.', { kind: 'info', timeout: 6000 });
+    }
     return true;
   } catch { return false; }
 }
@@ -147,6 +151,8 @@ export async function zkSignAndExecute(tx, okMsg) {
     const zkSig = getZkLoginSignature({ inputs: { ...s.proof, addressSeed: s.addressSeed }, maxEpoch: s.maxEpoch, userSignature });
     const sigs = sponsorSignature ? [zkSig, sponsorSignature] : [zkSig];
     const res = await sui.executeTransactionBlock({ transactionBlock: toBase64(bytes), signature: sigs, options: { showEffects: true } });
+    // A Move-aborted tx still lands on-chain with status "failure" — surface it as an error.
+    if (res.effects?.status?.status === 'failure') throw new Error(res.effects.status.error || 'transaction aborted on-chain');
     await sui.waitForTransaction({ digest: res.digest });
     toast(okMsg + (sponsorSignature ? ' · gas sponsored' : ''), { kind: 'success', tx: res.digest });
     document.dispatchEvent(new CustomEvent('wf:tx-done'));

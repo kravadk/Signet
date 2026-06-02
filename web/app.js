@@ -10,7 +10,7 @@ import {
   short, formatAddress, isValidSuiAddress, isValidSuiObjectId, MIST, suiAmount,
   PR_STATUS, prStatusLabel, ISSUE_STATUS, issueStatusLabel,
   BOUNTY_STATUS, bountyStatusLabel,
-  $, fields, escapeHtml,
+  $, fields, escapeHtml, withTimeout,
   SCOPE_OPEN_PR, SCOPE_REVIEW, SCOPE_RUN_CI, SCOPE_NAMES, scopeChips, scoreTier,
 } from './shared.js';
 import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeletonCards, skeletonRows, skeletonList } from './ui.js';
@@ -506,7 +506,7 @@ function renderReleases(releases, repoNameById) {
     '<div class="buy-item">' +
       '<div class="buy-thumb"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3.5-6.6"/><path d="M9 12l2 2 4-5"/></svg></div>' +
       '<div class="buy-info">' +
-        '<div class="buy-name">' + escapeHtml(r.version) + ' · ' + escapeHtml(repoNameById.get(r.repoId) || short(r.repoId)) + '</div>' +
+        '<div class="buy-name" title="' + escapeHtml(r.version + ' · ' + (repoNameById.get(r.repoId) || short(r.repoId))) + '">' + escapeHtml(r.version) + ' · ' + escapeHtml(repoNameById.get(r.repoId) || short(r.repoId)) + '</div>' +
         '<div class="buy-row"><span class="k">Status :</span><span class="pill released">Released</span></div>' +
         '<div class="buy-row"><span class="k">By :</span><a class="v link" target="_blank" rel="noreferrer" href="' + explorerObject(r.publishedBy) + '">' + short(r.publishedBy) + '</a></div>' +
         '<div class="buy-row"><span class="k">Chain :</span>' +
@@ -577,7 +577,7 @@ document.addEventListener('click', (e) => {
 
 function statError(id) {
   const el = $(id);
-  if (el) el.innerHTML = '<span style="color:var(--red);font-size:24px">—</span>';
+  if (el) el.innerHTML = '<span class="stat-err" title="failed to load — refresh to retry">—</span>';
 }
 
 /* ============================================================
@@ -610,7 +610,21 @@ async function loadData() {
   const badgeTxt = $('netBadgeTxt');
   if (badgeTxt) badgeTxt.textContent = CFG.network + ' · live';
   const badge = $('netBadge');
-  if (badge) badge.setAttribute('data-tip', 'Reading live data from Sui ' + CFG.network + ' + Walrus');
+  if (badge) {
+    const other = CFG.network === 'mainnet' ? 'testnet' : 'mainnet';
+    badge.setAttribute('data-tip', `Sui ${CFG.network} · click to switch to ${other}`);
+    badge.classList.add('net-switch');
+    if (!badge.dataset.wired) {
+      badge.dataset.wired = '1';
+      // The `sui` RPC client is a module singleton, so switching networks must reload
+      // the page (the ?network= query also persists to localStorage via pickNetwork).
+      badge.addEventListener('click', () => {
+        const next = CFG.network === 'mainnet' ? 'testnet' : 'mainnet';
+        try { localStorage.setItem('wf.network', next); } catch {}
+        location.search = '?network=' + next;
+      });
+    }
+  }
   const ownerNet = $('ownerNet');
   if (ownerNet) ownerNet.textContent = 'Sui ' + CFG.network;
 
@@ -630,15 +644,17 @@ async function loadData() {
   }
 
   try {
+    // withTimeout turns a hung fullnode into the same empty-state fallback as a
+    // rejection, so a slow RPC can never leave a view spinning forever.
     const [repos, prs, releases, reps, issues, bounties, activity, agentCaps] = await Promise.all([
-      listRepos().catch(() => []),
-      listAllPullRequests().catch(() => []),
-      listAllReleases().catch(() => []),
-      listAllReputation().catch(() => []),
-      listAllIssues().catch(() => []),
-      listAllBounties().catch(() => []),
-      listActivity().catch(() => ({ perMod: {}, total: 0, tsBuckets: new Map(), feed: [] })),
-      listAgentCaps().catch(() => new Map()),
+      withTimeout(listRepos(), 15000, 'repos').catch(() => []),
+      withTimeout(listAllPullRequests(), 15000, 'prs').catch(() => []),
+      withTimeout(listAllReleases(), 15000, 'releases').catch(() => []),
+      withTimeout(listAllReputation(), 15000, 'reputation').catch(() => []),
+      withTimeout(listAllIssues(), 15000, 'issues').catch(() => []),
+      withTimeout(listAllBounties(), 15000, 'bounties').catch(() => []),
+      withTimeout(listActivity(), 15000, 'activity').catch(() => ({ perMod: {}, total: 0, tsBuckets: new Map(), feed: [] })),
+      withTimeout(listAgentCaps(), 15000, 'caps').catch(() => new Map()),
     ]);
 
     // owner from first repo (owner card may be absent — guard each element)
@@ -877,7 +893,7 @@ function renderReposView() {
     '<div class="repo-card clickable" data-repoid="' + r.id + '">' +
       '<div class="repo-card-head">' +
         '<div class="repo-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v12"/><circle cx="5" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M18 8.5V13a4 4 0 0 1-4 4H7"/></svg></div>' +
-        '<div><div class="repo-name">' + escapeHtml(r.name) + '</div>' +
+        '<div><div class="repo-name" title="' + escapeHtml(r.name) + '">' + escapeHtml(r.name) + '</div>' +
         '<div class="repo-branch">' + escapeHtml(r.defaultBranch || 'main') + ' · ref v' + r.refVersion + '</div></div>' +
         (r.latestRelease ? '<span class="pill released" style="margin-left:auto">released</span>' : '') +
       '</div>' +
@@ -991,7 +1007,7 @@ function renderAgentsView() {
       '</div>' +
       delegation +
       '<div class="agent-foot">' +
-        '<button class="cmd-action prove-btn" data-prove="' + r.agent + '" style="background:var(--bg-elev);color:var(--tx);border:1px solid var(--bd)">Prove work</button>' +
+        '<button class="cmd-action prove-btn" data-prove="' + r.agent + '">Prove work</button>' +
         vouchBtn +
       '</div>' +
       '<div class="agent-note">Reputation is a side effect of real signed on-chain actions — not self-reported.</div>' +
@@ -1070,7 +1086,7 @@ function renderIssuesView() {
     return '<div class="repo-card">' +
       '<div class="pr-card-top"><span class="pill ' + (st === 'open' ? 'open' : 'closed') + '">' + st + '</span>' +
         '<a class="link mono" style="margin-left:auto" target="_blank" rel="noreferrer" href="' + explorerObject(i.id) + '">' + short(i.id) + '</a></div>' +
-      '<div class="pr-title">' + escapeHtml(i.title || '(untitled)') + '</div>' +
+      '<div class="pr-title" title="' + escapeHtml(i.title || '(untitled)') + '">' + escapeHtml(i.title || '(untitled)') + '</div>' +
       '<div class="repo-meta">' +
         '<div><span class="k">Author</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(i.author) + '">' + short(i.author) + '</a></div>' +
         '<div><span class="k">Comments</span><span class="mono">' + i.commentCount + '</span></div>' +
@@ -1099,7 +1115,7 @@ function renderBountiesView() {
     return '<div class="repo-card">' +
       '<div class="pr-card-top"><span class="pill ' + pillClass + '">' + st + '</span>' +
         '<span class="bounty-amount mono" style="margin-left:auto">' + suiAmount(b.amount) + ' SUI</span></div>' +
-      '<div class="pr-title">' + escapeHtml(b.title || '(untitled)') + '</div>' +
+      '<div class="pr-title" title="' + escapeHtml(b.title || '(untitled)') + '">' + escapeHtml(b.title || '(untitled)') + '</div>' +
       '<div class="repo-meta">' +
         '<div><span class="k">Funder</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(b.funder) + '">' + short(b.funder) + '</a></div>' +
         '<div><span class="k">Claimant</span><span class="mono">' + (b.claimant ? short(b.claimant) : '—') + '</span></div>' +
@@ -1409,7 +1425,7 @@ function prCardHtml(p) {
   return '<div class="pr-card clickable" data-prid="' + p.id + '">' +
     '<div class="pr-card-top"><span class="status ' + st + '">' + statusIcon(p.status) + st.charAt(0).toUpperCase() + st.slice(1) + '</span>' +
       '<span class="link mono" style="margin-left:auto">' + short(p.id) + '</span></div>' +
-    '<div class="pr-title">' + escapeHtml(p.title || '(untitled)') + '</div>' +
+    '<div class="pr-title" title="' + escapeHtml(p.title || '(untitled)') + '">' + escapeHtml(p.title || '(untitled)') + '</div>' +
     '<div class="repo-meta"><div><span class="k">Author</span><span class="mono">' + escapeHtml(nameOrShort(p.author)) + (STATE.wallet?.address === p.author ? ' <span class="you-tag">you</span>' : '') + '</span></div>' +
       '<div><span class="k">Reviews</span><span class="mono">' + (p.reviewRefs?.length || 0) + '</span></div></div>' +
   '</div>';
@@ -1552,8 +1568,51 @@ function rerenderAll() {
   renderReleases(STATE.releases, repoNameById); renderReputation(STATE.reps);
 }
 
+/** Help & concepts modal: what WalrusForge is, a short glossary, the integrations,
+    and quick links (in-app tabs + external docs). */
+function openHelp() {
+  openModal({
+    title: 'WalrusForge — help & concepts',
+    wide: true,
+    bodyHtml:
+      '<p class="help-lead">Describe an app, an LLM builds it in your browser, and you publish it with ' +
+      '<b>verifiable on-chain provenance</b> on Sui + Walrus. Every metric — visits, stars, tips, remix ' +
+      'lineage, reputation — is on-chain and unfakeable.</p>' +
+      '<h4 class="help-h">Key concepts</h4><ul class="help-gloss">' +
+      '<li><b>Walrus</b> — decentralized blob storage; app bytes + snapshots live here.</li>' +
+      '<li><b>Snapshot / treeHash</b> — deterministic hash of the files, anchored on-chain so bytes re-verify.</li>' +
+      '<li><b>Provenance chain</b> — source → artifact → review → release, each a verifiable on-chain link.</li>' +
+      '<li><b>AgentCap</b> — scoped, revocable capability letting an agent open PRs / review / run CI.</li>' +
+      '<li><b>Reputation</b> — earned on-chain (builders: apps·5 + stars·3 + remixes·4).</li>' +
+      '<li><b>Seal</b> — client-side encryption for private apps; only the builder can decrypt (on-chain gated).</li>' +
+      '<li><b>Paid fork</b> — a builder can charge to remix their app; the fee is paid to them on-chain.</li>' +
+      '</ul>' +
+      '<h4 class="help-h">Integrations</h4><ul class="help-gloss">' +
+      '<li><b>Walrus</b> — blob storage (publish + renew).</li>' +
+      '<li><b>Seal</b> — owner-only encryption for private apps.</li>' +
+      '<li><b>zkLogin</b> — sign in with Google, no wallet needed (optional).</li>' +
+      '<li><b>SuiNS</b> — reverse-resolves addresses to human names.</li>' +
+      '<li><b>MCP</b> — agents build + publish programmatically (see the MCP tab).</li>' +
+      '<li><b>Sponsored tx</b> — gas-free value-free actions when a sponsor is configured.</li>' +
+      '</ul>' +
+      '<h4 class="help-h">Links</h4><div class="help-links">' +
+      '<a class="help-link" href="#walrus">Walrus storage</a>' +
+      '<a class="help-link" href="#trust">Trust model</a>' +
+      '<a class="help-link" href="#mcp">MCP / agents API</a>' +
+      '<a class="help-link" target="_blank" rel="noreferrer" href="https://docs.wal.app">Walrus docs ↗</a>' +
+      '<a class="help-link" target="_blank" rel="noreferrer" href="https://docs.sui.io">Sui docs ↗</a>' +
+      '</div>' +
+      '<p class="help-foot">Active network: <b>' + CFG.network + '</b> · click the network badge to switch.</p>',
+    onMount(m) {
+      // In-app tab links should also close the modal (hash routing handles the nav).
+      m.querySelectorAll('.help-link[href^="#"]').forEach((a) => a.addEventListener('click', () => closeModal()));
+    },
+  });
+}
+
 function wireTopbar() {
   $('refreshBtn')?.addEventListener('click', () => { refresh(); toast('Refreshing…', { kind: 'info', timeout: 1200 }); });
+  $('helpBtn')?.addEventListener('click', openHelp);
   $('settingsBtn')?.addEventListener('click', openSettings);
   if (SETTINGS.reduceMotion) document.body.classList.add('reduce-motion');
   applyAutoPoll();
@@ -1570,14 +1629,18 @@ function renderOnboarding() {
     '<div><h3>Welcome to WalrusForge 🦭</h3>' +
     '<p>An agent-native release network on Sui + Walrus. Humans connect a wallet and act in-browser; agents act via MCP — both bounded by the same on-chain capabilities. Every release has a verifiable provenance chain.</p></div>' +
     '<div class="onboard-cta">' +
-    '<button class="btn-primary" id="obVerify">Verify a release</button>' +
-    '<button class="btn-ghost" id="obConnect">Connect wallet</button></div>' +
+    '<button class="btn-primary" id="obPlay">Open the Playground</button>' +
+    '<button class="btn-ghost" id="obConnect">Connect wallet</button>' +
+    '<button class="btn-ghost" id="obVerify">Verify a release</button>' +
+    '<button class="btn-ghost" id="obHelp">How it works</button></div>' +
     '<button class="onboard-x" id="obX" title="dismiss">×</button>';
   host.insertBefore(card, host.firstChild);
   const done = () => { localStorage.setItem('wf.onboarded', '1'); card.remove(); };
   $('obX').addEventListener('click', done);
+  $('obPlay').addEventListener('click', () => { done(); activateNav('playground'); });
   $('obVerify').addEventListener('click', () => { done(); activateNav('verify'); });
   $('obConnect').addEventListener('click', () => { done(); import('./wallet.js').then((m) => m.connectWallet()); });
+  $('obHelp').addEventListener('click', openHelp);
 }
 
 function renderFooter() {

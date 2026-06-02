@@ -134,6 +134,16 @@ export function saveSettings() {
 /* ---------- Sui client ---------- */
 export const sui = new SuiClient({ url: getFullnodeUrl(CFG.network) });
 
+/** Reject if a read (RPC/fetch) doesn't settle within `ms`, so a hung/slow
+    fullnode surfaces as an error instead of an indefinite spinner. Mirrors the
+    server-side `fetchT` timeout. */
+export function withTimeout(promise, ms = 12000, label = 'request') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' timed out')), ms)),
+  ]);
+}
+
 /* ---------- Explorer + Walrus links (network- and explorer-setting-aware) ---------- */
 const NET = CFG.network; // 'testnet' | 'mainnet'
 // Suiscan: mainnet path is /mainnet, testnet is /testnet. SuiVision: mainnet has no

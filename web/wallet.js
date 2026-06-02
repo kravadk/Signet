@@ -11,7 +11,7 @@ import { getFaucetHost, requestSuiFromFaucetV1 } from 'https://esm.sh/@mysten/su
 import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
 import {
   CFG, SETTINGS, sui, STATE, $, short, suiAmount, escapeHtml,
-  explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW,
+  explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW, withTimeout,
 } from './shared.js';
 import { toast, copyText, openModal, closeModal } from './ui.js';
 import { zkSignAndExecute, zkLogout } from './zklogin.js';
@@ -60,6 +60,12 @@ async function doConnect(w) {
     STATE.wallet = { address: account.address, account, wallet: w };
     localStorage.setItem(LAST_WALLET, w.name);
     toast(`Connected ${short(account.address)}`, { kind: 'success' });
+    // Best-effort network-mismatch warning: if the account advertises chains and none
+    // match the active network, txs will be rejected — tell the user how to fix it.
+    const chains = account.chains || [];
+    if (chains.length && !chains.includes(`sui:${CFG.network}`)) {
+      toast(`This wallet is on ${chains.join(', ').replace(/sui:/g, '')} — WalrusForge is on ${CFG.network}. Switch your wallet's network, or click the network badge to switch the app.`, { kind: 'info', timeout: 6000 });
+    }
     await afterConnect();
   } catch (e) {
     toast('Connect failed: ' + (e?.message || e), { kind: 'error' });
@@ -91,9 +97,13 @@ async function afterConnect() {
 /* ---------- Balance ---------- */
 async function loadBalance() {
   try {
-    const b = await sui.getBalance({ owner: STATE.wallet.address });
+    const b = await withTimeout(sui.getBalance({ owner: STATE.wallet.address }), 12000, 'balance');
     STATE.wallet.balance = b.totalBalance;
-  } catch { STATE.wallet.balance = null; }
+    STATE.wallet.balanceError = false;
+  } catch {
+    STATE.wallet.balance = null;
+    STATE.wallet.balanceError = true; // distinguishes "failed to load" from "0" so the menu can offer retry
+  }
 }
 
 /* ---------- Owned caps (RepoOwnerCap / AgentCap) ---------- */
@@ -166,7 +176,9 @@ function toggleMenu() {
   menuOpen = !menuOpen;
   if (!menuOpen) { menu.classList.remove('show'); return; }
   const a = STATE.wallet.address;
-  const bal = STATE.wallet.balance != null ? suiAmount(STATE.wallet.balance) + ' SUI' : '…';
+  const bal = STATE.wallet.balanceError
+    ? 'failed to load <button class="wm-retry" data-act="rebal">retry</button>'
+    : (STATE.wallet.balance != null ? suiAmount(STATE.wallet.balance) + ' SUI' : '…');
   const ownerN = STATE.myCaps.owner.size, agentN = STATE.myCaps.agent.size;
   menu.innerHTML =
     `<div class="wm-row"><span class="k">Address</span><span class="v">${short(a)}</span></div>` +
@@ -179,6 +191,11 @@ function toggleMenu() {
     '<div class="wm-item" data-act="disconnect">Disconnect</div>';
   menu.classList.add('show');
   menu.querySelector('[data-act=copy]')?.addEventListener('click', () => { copyText(a, 'Address copied'); });
+  menu.querySelector('[data-act=rebal]')?.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    await loadBalance(); renderConnect();
+    menuOpen = false; toggleMenu(); // rebuild the menu with fresh balance + handlers
+  });
   menu.querySelector('[data-act=faucet]')?.addEventListener('click', async () => {
     toast('Requesting testnet SUI…', { kind: 'info', timeout: 1500 });
     try { await requestSuiFromFaucetV1({ host: getFaucetHost('testnet'), recipient: a }); toast('Faucet sent — balance updates shortly', { kind: 'success' }); loadBalance().then(() => renderConnect()); }
@@ -197,6 +214,16 @@ export function wireWallet() {
     if (menuOpen && !e.target.closest('#walletMenu') && !e.target.closest('#connectBtn')) {
       menuOpen = false; const m = $('walletMenu'); if (m) m.classList.remove('show');
     }
+  });
+  // After any successful tx, the on-chain balance changed — refresh it so the wallet
+  // chip/menu never shows a stale number (previously it only updated on reconnect).
+  document.addEventListener('wf:tx-done', () => {
+    if (!STATE.wallet) return;
+    loadBalance().then(() => {
+      renderConnect();
+      const balEl = document.querySelector('#walletMenu .wm-bal');
+      if (menuOpen && balEl) balEl.textContent = STATE.wallet.balance != null ? suiAmount(STATE.wallet.balance) + ' SUI' : '…';
+    }).catch(() => {});
   });
   // auto-reconnect (wallets register asynchronously; retry briefly)
   const last = localStorage.getItem(LAST_WALLET);
@@ -227,7 +254,12 @@ export async function signAndRun(tx, okMsg) {
       chain: `sui:${CFG.network}`,
     });
     const digest = res.digest;
-    await sui.waitForTransaction({ digest });
+    // Authoritative result from the fullnode — a Move-aborted tx still lands on-chain
+    // with status "failure", so we MUST check effects, not just that it executed.
+    const conf = await sui.waitForTransaction({ digest, options: { showEffects: true } });
+    if (conf.effects?.status?.status === 'failure') {
+      throw new Error(conf.effects.status.error || 'transaction aborted on-chain');
+    }
     toast(okMsg, { kind: 'success', tx: digest });
     document.dispatchEvent(new CustomEvent('wf:tx-done'));
     return res;
@@ -265,6 +297,12 @@ export async function signAndRunSponsored(tx, okMsg) {
       signature: [signed.signature, sponsorSignature],
       options: { showEffects: true },
     });
+    // Executed but aborted on-chain → surface the error and DO NOT fall back to
+    // user-paid (it would just abort again). Return null so the caller skips fallback.
+    if (res.effects?.status?.status === 'failure') {
+      toast('Tx failed: ' + (res.effects.status.error || 'aborted on-chain'), { kind: 'error', tx: res.digest });
+      return null;
+    }
     await sui.waitForTransaction({ digest: res.digest });
     toast(okMsg + ' · gas sponsored', { kind: 'success', tx: res.digest });
     document.dispatchEvent(new CustomEvent('wf:tx-done'));
