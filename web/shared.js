@@ -223,6 +223,15 @@ export function scopeChips(scopes) {
   return SCOPE_NAMES.filter(([bit]) => (scopes & bit) === bit).map(([, n]) => n);
 }
 
+/* Named AgentCap capability presets (mirror of app/src/lib/sui.ts CAP_PRESETS). */
+export const CAP_PRESETS = {
+  'review-only': { scopes: SCOPE_REVIEW, label: 'reviewer' },
+  'ci-runner': { scopes: SCOPE_RUN_CI, label: 'ci-runner' },
+  'frontend-builder': { scopes: SCOPE_OPEN_PR, label: 'builder' },
+  'bounty-worker': { scopes: SCOPE_OPEN_PR | SCOPE_REVIEW, label: 'bounty-worker' },
+  'trusted-maintainer': { scopes: SCOPE_OPEN_PR | SCOPE_REVIEW | SCOPE_RUN_CI, label: 'maintainer' },
+};
+
 /* Trust tier from aggregate score (derived, display-only). */
 export function scoreTier(score) {
   if (score >= 50) return { tier: 'trusted', cls: 'tier-trusted' };

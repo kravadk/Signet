@@ -465,3 +465,29 @@ export async function approveBounty(ctx: ForgeContext, args: { bountyId: string 
 export const SCOPE_OPEN_PR = 1;
 export const SCOPE_REVIEW = 2;
 export const SCOPE_RUN_CI = 4;
+
+/** Map a scope token (open_pr | review | run_ci) to its bit. */
+export const SCOPE_BITS: Record<string, number> = {
+  open_pr: SCOPE_OPEN_PR,
+  review: SCOPE_REVIEW,
+  run_ci: SCOPE_RUN_CI,
+};
+
+/** Decode a scopes bitmask into its token names (for display/UX). */
+export function scopeNames(scopes: number): string[] {
+  return Object.entries(SCOPE_BITS)
+    .filter(([, bit]) => (scopes & bit) !== 0)
+    .map(([name]) => name);
+}
+
+/**
+ * Named AgentCap capability presets — developer-friendly shorthands over the
+ * raw scope bitmask. `expires` is left to the caller (presets don't pin a TTL).
+ */
+export const CAP_PRESETS: Record<string, { scopes: number; label: string }> = {
+  "review-only": { scopes: SCOPE_REVIEW, label: "reviewer" },
+  "ci-runner": { scopes: SCOPE_RUN_CI, label: "ci-runner" },
+  "frontend-builder": { scopes: SCOPE_OPEN_PR, label: "builder" },
+  "bounty-worker": { scopes: SCOPE_OPEN_PR | SCOPE_REVIEW, label: "bounty-worker" },
+  "trusted-maintainer": { scopes: SCOPE_OPEN_PR | SCOPE_REVIEW | SCOPE_RUN_CI, label: "maintainer" },
+};

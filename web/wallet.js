@@ -11,7 +11,7 @@ import { getFaucetHost, requestSuiFromFaucetV1 } from 'https://esm.sh/@mysten/su
 import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 import {
   CFG, SETTINGS, sui, STATE, $, short, suiAmount, escapeHtml,
-  explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW, withTimeout,
+  explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW, withTimeout, CAP_PRESETS, scopeChips,
 } from './shared.js';
 import { toast, copyText, openModal, closeModal } from './ui.js';
 import { zkSignAndExecute, zkLogout } from './zklogin.js';
@@ -378,16 +378,23 @@ export async function actPostBounty(repoId) {
 
 /* ----- owner-only ----- */
 export async function actGrantAgent(repoId, ownerCapId) {
+  const presetOptions = Object.entries(CAP_PRESETS).map(([key, p]) => ({
+    value: key, label: `${key} (${scopeChips(p.scopes).join('+') || 'none'})`,
+  }));
   formModal('Grant AgentCap', [
     { id: 'recipient', label: 'Agent address (0x…)', type: 'text' },
-    { id: 'label', label: 'Label', type: 'text' },
+    { id: 'preset', label: 'Capability preset', type: 'select', options: presetOptions, value: 'bounty-worker' },
+    { id: 'label', label: 'Label (optional — defaults to preset)', type: 'text' },
+    { id: 'expires', label: 'Expiry epoch (0 = never)', type: 'number', value: '0' },
   ], async (v, setBusy) => {
     setBusy(true);
     try {
+      const preset = CAP_PRESETS[v.preset] || CAP_PRESETS['bounty-worker'];
       const tx = new Transaction();
       pkgCall(tx, 'forge::grant_agent_cap', [
         tx.object(repoId), tx.object(ownerCapId), tx.pure.address(v.recipient),
-        tx.pure.u8(SCOPE_OPEN_PR | SCOPE_REVIEW), tx.pure.u64(0), tx.pure.string(v.label || 'agent'),
+        tx.pure.u8(preset.scopes), tx.pure.u64(Math.max(0, Math.floor(Number(v.expires) || 0))),
+        tx.pure.string(v.label || preset.label),
       ]);
       const r = await signAndRun(tx, 'AgentCap granted'); if (r) closeModal();
     } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
@@ -444,7 +451,9 @@ function formModal(title, fields, onSubmit) {
   const body = fields.map((f) =>
     f.type === 'textarea'
       ? `<label>${f.label}</label><textarea id="fm-${f.id}"></textarea>`
-      : `<label>${f.label}</label><input type="${f.type}" id="fm-${f.id}" value="${escapeHtml(f.value || '')}">`).join('') +
+      : f.type === 'select'
+        ? `<label>${f.label}</label><select id="fm-${f.id}">${(f.options || []).map((o) => `<option value="${escapeHtml(o.value)}"${o.value === f.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select>`
+        : `<label>${f.label}</label><input type="${f.type}" id="fm-${f.id}" value="${escapeHtml(f.value || '')}">`).join('') +
     '<div class="modal-actions"><button class="btn-ghost" id="fm-cancel">Cancel</button>' +
     '<button class="btn-primary" id="fm-submit">Sign &amp; submit</button></div>';
   openModal({ title, bodyHtml: body, onMount(m) {

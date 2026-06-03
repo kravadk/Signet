@@ -36,6 +36,8 @@ import {
   createdOfType,
   SCOPE_OPEN_PR,
   SCOPE_REVIEW,
+  SCOPE_BITS,
+  CAP_PRESETS,
 } from "../lib/sui.js";
 import { findReputationLedger } from "../lib/forge-read.js";
 
@@ -157,21 +159,53 @@ program
 
 program
   .command("grant-agent")
-  .description("Grant an AgentCap (open_pr + review) to an address")
+  .description("Grant an AgentCap to an address (use --preset or --scopes; defaults to open_pr+review)")
   .requiredOption("-r, --recipient <address>", "agent address")
   .option("-d, --dir <dir>", "repo dir", ".")
+  .option(
+    "--preset <name>",
+    `capability preset: ${Object.keys(CAP_PRESETS).join(" | ")}`,
+  )
+  .option("--scopes <csv>", "explicit scopes, comma-separated: open_pr,review,run_ci")
   .option("--expires <epoch>", "expiry epoch (0 = never)", "0")
-  .option("--label <label>", "human label", "agent")
+  .option("--label <label>", "human label")
   .action(async (opts) => {
     const ctx = makeContext(NET);
     const s = loadState(opts.dir);
+    // Resolve scopes + label: --scopes > --preset > default(open_pr+review).
+    let scopes: number;
+    let label: string;
+    if (opts.scopes) {
+      const bits = String(opts.scopes)
+        .split(",")
+        .map((t: string) => t.trim().toLowerCase())
+        .filter(Boolean);
+      const unknown = bits.filter((b: string) => !(b in SCOPE_BITS));
+      if (unknown.length) {
+        console.error(`unknown scope(s): ${unknown.join(", ")} — valid: ${Object.keys(SCOPE_BITS).join(", ")}`);
+        process.exit(1);
+      }
+      scopes = bits.reduce((m: number, b: string) => m | SCOPE_BITS[b], 0);
+      label = opts.label ?? "agent";
+    } else if (opts.preset) {
+      const preset = CAP_PRESETS[opts.preset];
+      if (!preset) {
+        console.error(`unknown preset: ${opts.preset} — valid: ${Object.keys(CAP_PRESETS).join(", ")}`);
+        process.exit(1);
+      }
+      scopes = preset.scopes;
+      label = opts.label ?? preset.label;
+    } else {
+      scopes = SCOPE_OPEN_PR | SCOPE_REVIEW;
+      label = opts.label ?? "agent";
+    }
     const res = await grantAgentCap(ctx, {
       repoId: s.repoId,
       ownerCapId: s.ownerCapId,
       recipient: opts.recipient,
-      scopes: SCOPE_OPEN_PR | SCOPE_REVIEW,
+      scopes,
       expiresAtEpoch: Number(opts.expires),
-      label: opts.label,
+      label,
     });
     const capId = createdOfType(res, "::forge::AgentCap")[0];
     console.log(`✓ AgentCap granted to ${opts.recipient}`);

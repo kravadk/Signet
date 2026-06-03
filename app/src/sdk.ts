@@ -17,6 +17,10 @@ export {
   loadKeypairFromKeystore,
   SCOPE_OPEN_PR,
   SCOPE_REVIEW,
+  SCOPE_RUN_CI,
+  SCOPE_BITS,
+  scopeNames,
+  CAP_PRESETS,
 } from "./lib/sui.js";
 export type { Deployment, ForgeContext } from "./lib/sui.js";
 
