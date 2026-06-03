@@ -1423,6 +1423,13 @@ body:not(.reduce-motion) .onboard { animation: cardIn .4s var(--ease) both; }
 .pg-cat-pill { font-size: 11.5px; text-transform: capitalize; color: var(--tx-2); background: transparent; border: 1px solid var(--bd); border-radius: 999px; padding: 4px 11px; cursor: pointer; transition: .15s; }
 .pg-cat-pill:hover { color: var(--tx); }
 .pg-cat-pill.on { background: rgba(77,162,255,.12); border-color: rgba(77,162,255,.4); color: var(--blue); }
+.hist-actions { display: inline-flex; gap: 5px; margin-left: auto; }
+.diff-summary { font-size: 12.5px; margin: 0 0 10px; }
+.diff-add { color: #3fb950; } .diff-del { color: #f85149; }
+.diff-body { max-height: 60vh; overflow: auto; font-family: var(--mono, monospace); font-size: 12px; }
+.diff-line { white-space: pre-wrap; padding: 1px 6px; border-radius: 3px; }
+.diff-line.add { background: rgba(63,185,80,.12); } .diff-line.del { background: rgba(248,81,73,.12); }
+.diff-sign { display: inline-block; width: 12px; opacity: .7; }
 .pg-search:focus { border-color: var(--blue); }
 
 .pg-card { background: var(--bg-card); border: 1px solid var(--bd); border-radius: var(--r-md); padding: 15px; display: flex; flex-direction: column; gap: 10px; transition: border-color .15s; }

@@ -163,6 +163,9 @@ public struct AppTipped has copy, drop { app_id: ID, from: address, amount: u64,
 public struct AppFlagged has copy, drop { app_id: ID, by: address, flags: u64 }
 public struct AppHidden has copy, drop { app_id: ID, hidden: bool }
 public struct AppUpdated has copy, drop { app_id: ID, tree_hash: String, updated_at_ms: u64 }
+/// v2: also carries the version's Walrus blob ids so the version history can fetch,
+/// diff, and remix any past version (the v1 event only carried the tree hash).
+public struct AppUpdatedV2 has copy, drop { app_id: ID, tree_hash: String, manifest_blob: String, archive_blob: String, updated_at_ms: u64 }
 public struct NameClaimed has copy, drop { name: String, owner: address }
 public struct NameReleased has copy, drop { name: String, owner: address }
 public struct TreasuryWithdrawn has copy, drop { to: address, amount: u64 }
@@ -432,6 +435,26 @@ public fun update_app(
     app.archive_blob = archive_blob;
     app.tree_hash = tree_hash;
     event::emit(AppUpdated { app_id: object::id(app), tree_hash: app.tree_hash, updated_at_ms: clock::timestamp_ms(clock) });
+}
+
+/// Like `update_app`, but emits `AppUpdatedV2` carrying the version's blob ids so
+/// the version history can fetch/diff/remix any past version. Builder-only.
+public fun update_app_v2(
+    app: &mut PublishedApp,
+    manifest_blob: String, archive_blob: String, tree_hash: String,
+    clock: &Clock, ctx: &TxContext,
+) {
+    assert!(ctx.sender() == app.builder, ENotBuilder);
+    app.manifest_blob = manifest_blob;
+    app.archive_blob = archive_blob;
+    app.tree_hash = tree_hash;
+    event::emit(AppUpdatedV2 {
+        app_id: object::id(app),
+        tree_hash: app.tree_hash,
+        manifest_blob: app.manifest_blob,
+        archive_blob: app.archive_blob,
+        updated_at_ms: clock::timestamp_ms(clock),
+    });
 }
 
 // ===== Namespace (handles) =====

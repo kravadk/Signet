@@ -15,9 +15,9 @@ const DEPLOYMENTS = {
     // Original package — existing repos/PRs/releases events + object types stay under
     // this id (event/type filters use it). WRITES go to the latest upgrade below.
     packageId: '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1',
-    // Latest forge/bounty/reputation upgrade (v10) — forge-module WRITES target this so
-    // new functions (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability) resolve.
-    writePackageId: '0xe1e04781c3ada18ce5cdcaadbbc0fd7197b18b63400d49248240eaeff2a96bd5',
+    // Latest upgrade (v11) — forge-module WRITES target this so new functions
+    // (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability, update_app_v2) resolve.
+    writePackageId: '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70',
     mvrName: '@signet/forge',
     mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02',
@@ -27,13 +27,14 @@ const DEPLOYMENTS = {
     // Upgraded package (playground + builder-reputation + moderation + remix-reputation
     // + versioning/update_app + handles/NameRegistry + Treasury/tip_app_v2 + app-bounties
     // + paid-fork set_fork_price/pay_to_fork + private apps set_private/seal_approve_app_owner) — Playground WRITES/calls.
-    playgroundPackageId: '0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e',
+    playgroundPackageId: '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70',
     // An event's type carries the package id of the UPGRADE that DEFINED its struct —
     // not the original module id. So AppPublished lives under the original pkg, but
     // BuilderScored/AppFlagged/NameClaimed/AppBounty*/AppForkPaid/AppPrivacySet live under later upgrade pkgs.
     // Event reads must query ALL historical playground packages and merge.
     playgroundEventPkg: '0x78ff7299034508b8581a9725d8c6d6bda86813fbdacc5bb8666c0789908b1fcd',
     playgroundEventPkgs: [
+      '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70', // v11 (AppUpdatedV2 — version blob ids)
       '0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e', // v9 (private apps: AppPrivacySet)
       '0xb2054d83ea80eac464e9601e0c9a5e7a06920e0161ca4f313ec03c4d3c62a760', // v8 (paid-fork: ForkPriceSet/AppForkPaid)
       '0x77dcd2cf25f851770105282d48ea847e411c2043d6d894e8dee29eb16abcb33a', // v7 (app bounties)

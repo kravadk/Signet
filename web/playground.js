@@ -521,8 +521,9 @@ async function publish() {
     const tx = new Transaction();
     if (pg.updateTarget) {
       // Versioning: re-anchor manifest/archive/treeHash on the SAME app object.
-      // Old blobs persist in Walrus; AppUpdated events form the version history.
-      pgCall(tx, 'playground::update_app', [
+      // update_app_v2 emits AppUpdatedV2 with the version's blob ids so the history
+      // can fetch/diff/remix any past version. Old blobs persist in Walrus.
+      pgCall(tx, 'playground::update_app_v2', [
         tx.object(pg.updateTarget),
         tx.pure.string(manifestBlob),
         tx.pure.string(archiveBlob),
@@ -856,24 +857,121 @@ export function appViewerUrl(app) {
 
 function appById(id) { return pg.gallery.find((a) => a.id === id); }
 
-/** Version history for an app: v1 = publish, each AppUpdated event = a new version. */
+// Version snapshots keyed by app id, captured for diff/view/remix actions.
+const _histVersions = new Map();
+
+/** Version history: merges v1 AppUpdated (tree hash only) and v2 AppUpdatedV2
+    (with blob ids). v2 versions can be viewed, diffed, and remixed. */
 async function showAppHistory(id) {
   const app = appById(id);
   openModal({ title: `Version history${app ? ' — ' + escapeHtml(app.name) : ''}`, bodyHtml: '<div id="pgHist" class="verify-steps">loading…</div>' });
   try {
-    const events = await pgEvents('AppUpdated', { limit: 500, order: 'ascending' });
-    const mine = events.filter((e) => e.parsedJson?.app_id === id);
-    const rows = [{ v: 1, label: 'published', treeHash: app?.treeHash || '', ts: app?.createdAt || 0 }];
-    mine.forEach((e, i) => rows.push({ v: i + 2, label: 'updated', treeHash: e.parsedJson?.tree_hash || '', ts: Number(e.parsedJson?.updated_at_ms) || 0 }));
+    const [v1ev, v2ev] = await Promise.all([
+      pgEvents('AppUpdated', { limit: 500, order: 'ascending' }),
+      pgEvents('AppUpdatedV2', { limit: 500, order: 'ascending' }),
+    ]);
+    const updates = [
+      ...v1ev.filter((e) => e.parsedJson?.app_id === id).map((e) => ({ treeHash: e.parsedJson.tree_hash, ts: Number(e.parsedJson.updated_at_ms) || 0, manifestBlob: null, archiveBlob: null })),
+      ...v2ev.filter((e) => e.parsedJson?.app_id === id).map((e) => ({ treeHash: e.parsedJson.tree_hash, ts: Number(e.parsedJson.updated_at_ms) || 0, manifestBlob: e.parsedJson.manifest_blob, archiveBlob: e.parsedJson.archive_blob })),
+    ].sort((a, b) => a.ts - b.ts);
+    const rows = [{ v: 1, label: 'published', treeHash: app?.treeHash || '', ts: app?.createdAt || 0, manifestBlob: app?.manifestBlob, archiveBlob: app?.archiveBlob }];
+    updates.forEach((u, i) => rows.push({ v: i + 2, label: 'updated', ...u }));
+    _histVersions.set(id, rows);
     const host = $('pgHist'); if (!host) return;
-    host.innerHTML = rows.reverse().map((r) =>
-      '<div class="vstep ok"><span class="vmark">v' + r.v + '</span>' +
-      '<span class="vlabel">' + r.label + (r.ts ? ' · ' + new Date(r.ts).toLocaleString() : '') + '</span>' +
-      '<span class="vdetail mono">' + escapeHtml(short(r.treeHash || '—')) + '</span></div>').join('') +
-      (mine.length ? '' : '<p class="pg-dim">No updates yet — this is the original version.</p>');
+    host.innerHTML = rows.slice().reverse().map((r, idx) => {
+      const canDo = !!r.archiveBlob && !app?.private;
+      const actions = canDo
+        ? '<span class="hist-actions">' +
+            '<button class="btn-ghost pg-mini" data-hist="view" data-app="' + id + '" data-v="' + r.v + '">View</button>' +
+            (r.v !== rows.length ? '<button class="btn-ghost pg-mini" data-hist="diff" data-app="' + id + '" data-v="' + r.v + '">Diff vs latest</button>' : '') +
+            '<button class="btn-ghost pg-mini" data-hist="remix" data-app="' + id + '" data-v="' + r.v + '">Remix this version</button>' +
+          '</span>'
+        : (app?.private ? '<span class="pg-dim">private</span>' : '<span class="pg-dim">legacy (no blob id)</span>');
+      return '<div class="vstep ok"><span class="vmark">v' + r.v + (idx === 0 ? ' ★' : '') + '</span>' +
+        '<span class="vlabel">' + r.label + (r.ts ? ' · ' + new Date(r.ts).toLocaleString() : '') + ' · <span class="mono">' + escapeHtml(short(r.treeHash || '—')) + '</span></span>' +
+        actions + '</div>';
+    }).join('') + (updates.length ? '' : '<p class="pg-dim">No updates yet — this is the original version.</p>');
+    host.querySelectorAll('[data-hist]').forEach((b) => b.addEventListener('click', () => {
+      const act = b.dataset.hist; const v = Number(b.dataset.v);
+      if (act === 'view') viewVersion(id, v);
+      else if (act === 'diff') diffVersion(id, v);
+      else if (act === 'remix') remixVersion(id, v);
+    }));
   } catch (e) {
     const host = $('pgHist'); if (host) host.innerHTML = '<p class="pg-warn">History unavailable: ' + escapeHtml(e.message || String(e)) + '</p>';
   }
+}
+
+function _histRow(id, v) { return (_histVersions.get(id) || []).find((r) => r.v === v); }
+
+/** Fetch a version's index.html by its archive blob (public apps only). */
+async function fetchVersionHtml(archiveBlob) {
+  const html = await fetchAppHtml({ id: 'version', archiveBlob, private: false });
+  return html;
+}
+
+/** Open a past version's rendered HTML in a new tab. */
+async function viewVersion(id, v) {
+  const row = _histRow(id, v); if (!row?.archiveBlob) return;
+  toast('Loading version…', { kind: 'info', timeout: 1200 });
+  try {
+    const html = await fetchVersionHtml(row.archiveBlob);
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { toast('View failed: ' + (e.message || e), { kind: 'error' }); }
+}
+
+/** Show a simple line-diff between a past version and the latest. */
+async function diffVersion(id, v) {
+  const rows = _histVersions.get(id) || []; const row = _histRow(id, v);
+  const latest = rows[rows.length - 1];
+  if (!row?.archiveBlob || !latest?.archiveBlob) return;
+  openModal({ title: `Diff — v${v} vs v${latest.v}`, bodyHtml: '<div id="pgDiff" class="diff-body">computing…</div>' });
+  try {
+    const [oldH, newH] = await Promise.all([fetchVersionHtml(row.archiveBlob), fetchVersionHtml(latest.archiveBlob)]);
+    const host = $('pgDiff'); if (!host) return;
+    host.innerHTML = lineDiffHtml(oldH, newH);
+  } catch (e) { const host = $('pgDiff'); if (host) host.innerHTML = '<p class="pg-warn">Diff failed: ' + escapeHtml(e.message || String(e)) + '</p>'; }
+}
+
+/** Minimal LCS-free line diff: marks lines present only in old (−) or new (+). */
+function lineDiffHtml(oldText, newText) {
+  const o = oldText.split('\n'), n = newText.split('\n');
+  const oSet = new Set(o), nSet = new Set(n);
+  const removed = o.filter((l) => !nSet.has(l)).length;
+  const added = n.filter((l) => !oSet.has(l)).length;
+  const merged = [];
+  const seen = new Set();
+  for (const l of o) if (!nSet.has(l) && !seen.has('-' + l)) { merged.push({ t: '-', l }); seen.add('-' + l); }
+  for (const l of n) if (!oSet.has(l) && !seen.has('+' + l)) { merged.push({ t: '+', l }); seen.add('+' + l); }
+  const body = merged.slice(0, 400).map((d) =>
+    '<div class="diff-line ' + (d.t === '+' ? 'add' : 'del') + '"><span class="diff-sign">' + d.t + '</span>' + escapeHtml(d.l.slice(0, 300)) + '</div>').join('');
+  return '<div class="diff-summary"><span class="diff-add">+' + added + '</span> <span class="diff-del">−' + removed + '</span> lines changed</div>' +
+    (body || '<p class="pg-dim">No textual differences.</p>');
+}
+
+/** Load a past version into the editor as a remix (rollback-by-remix). */
+async function remixVersion(id, v) {
+  const app = appById(id); const row = _histRow(id, v); if (!row?.archiveBlob) return;
+  toast('Loading version into editor…', { kind: 'info', timeout: 1500 });
+  try {
+    const html = await fetchVersionHtml(row.archiveBlob);
+    closeModal();
+    pg.updateTarget = null;
+    pg.remixParent = id;
+    pg.remixForkPrice = app?.forkPrice || 0;
+    pg.basePrompt = app?.prompt || null;
+    pg.messages = [
+      { role: 'user', content: `Here is version v${v} of app "${app?.name || id}" to remix. The current index.html is:\n\n${html}\n\nWait for my next instruction.` },
+      { role: 'assistant', content: 'Loaded that version. Tell me what to change and I will produce the updated app JSON.' },
+    ];
+    pg.current = { name: (app?.name || 'app') + '-v' + v, category: app?.category || 'other', prompt: app?.prompt || '', files: [{ path: 'index.html', content: html }] };
+    setPreview(pg.current);
+    $('pgMessages').innerHTML = '';
+    pushMsg('bot', `Remixing <b>${escapeHtml(app?.name || id)} v${v}</b> — preview loaded. Describe changes, then Publish (records lineage on-chain).`);
+    $('pgInput').focus();
+  } catch (e) { toast('Remix failed: ' + (e.message || e), { kind: 'error' }); }
 }
 
 /** Prefer an on-chain claimed handle (@name) over a SuiNS/short address. */

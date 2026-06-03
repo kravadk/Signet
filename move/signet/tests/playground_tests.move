@@ -338,6 +338,22 @@ fun test_update_app_rewrites_content() {
 }
 
 #[test]
+fun test_update_app_v2_rewrites_content() {
+    let mut scen = setup();
+    publish_one(&mut scen);
+    scen.next_tx(BUILDER);
+    {
+        let mut app = scen.take_shared<PublishedApp>();
+        let clk = clock::create_for_testing(scen.ctx());
+        pg::update_app_v2(&mut app, s(b"manifest_v2"), s(b"archive_v2"), s(b"treehash_v2"), &clk, scen.ctx());
+        assert!(pg::tree_hash(&app) == s(b"treehash_v2"), 0);
+        clock::destroy_for_testing(clk);
+        ts::return_shared(app);
+    };
+    scen.end();
+}
+
+#[test]
 #[expected_failure(abort_code = signet::playground::ENotBuilder)]
 fun test_non_builder_cannot_update() {
     let mut scen = setup();
