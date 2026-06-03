@@ -1,9 +1,0 @@
-{
-  "site_name": "WalrusForge",
-  "routes": {
-    "/repo/*": "/repo/__id__/index.html",
-    "/pr/*": "/pr/__id__/index.html",
-    "/release/*": "/release/__id__/index.html",
-    "/agent/*": "/agent/__address__/index.html"
-  }
-}

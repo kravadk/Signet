@@ -1,0 +1,11 @@
+{
+  "name": "signet-llm-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny Anthropic relay so Signet Playground users don't need their own key (backend P0).",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.mjs"
+  }
+}

@@ -1,11 +1,11 @@
 /**
- * High-level WalrusForge actions, shared by the MCP server (and reusable by the
+ * High-level Signet actions, shared by the MCP server (and reusable by the
  * CLI). Each returns a plain structured object — no console output — so callers
  * decide how to present results. Composes the lib + read layers.
  */
 
-import { storeBlob, blobUrl } from "./walrus.js";
-import { buildSnapshotFromMemory } from "./snapshot.js";
+import { storeBlobAuto, blobUrl, readBlob } from "./walrus.js";
+import { buildSnapshotFromMemory, verifyTreeHash } from "./snapshot.js";
 import {
   type ForgeContext,
   openPrAsAgent,
@@ -15,18 +15,23 @@ import {
   postBounty,
   claimBounty,
   submitBounty,
+  vouch,
+  publishApp,
   createdOfType,
 } from "./sui.js";
 import {
   listRepos,
   getRepo,
   getRelease,
+  getPullRequest,
   fetchManifest,
   findReputationLedger,
   listIssues,
   listBounties,
   getReputation,
 } from "./forge-read.js";
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { loadDeployment } from "./sui.js";
 
 // Runtime clock — fine here (not inside a workflow script).
 const nowMs = () => Date.now();
@@ -87,6 +92,137 @@ export async function releaseRead(args: { releaseId: string }) {
   };
 }
 
+// ===== Verify (read-only provenance check) =====
+
+const _vNet = process.env.FORGE_NETWORK === "mainnet" ? "mainnet" : "testnet";
+const _vClient = new SuiClient({ url: getFullnodeUrl(_vNet) });
+const _vPkg = loadDeployment(_vNet).packageId;
+
+export interface VerifyStep {
+  key: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface VerifyResult {
+  releaseId: string;
+  version: string | null;
+  repoId: string | null;
+  pass: boolean;
+  level: number; // SLSA-style: 0 fail, 1 source+artifact, 2 +reviewed, 3 +chain matches
+  levelLabel: string;
+  steps: VerifyStep[];
+}
+
+/** Is a Walrus blob fetchable from the aggregator? (availability = integrity backbone) */
+async function blobAvailable(blobId: string): Promise<boolean> {
+  if (!blobId) return false;
+  try {
+    await readBlob(blobId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Independently verify a release's provenance chain. Read-only: reads the
+ * on-chain Release + Walrus blobs and re-checks integrity. No keys needed.
+ *
+ * Steps (in-toto / Sigstore-Rekor inspired):
+ *  1. Release object exists on-chain.
+ *  2. Source / artifact / report blobs are all available on Walrus.
+ *  3. Source manifest's treeHash recomputes correctly (content integrity).
+ *  4. A merged PR's head snapshot matches the release source (the code that was
+ *     reviewed is the code that was released).
+ * SLSA-style level: 1 = source+artifact present, 2 = a signed review exists in
+ * the chain, 3 = treeHash verifies AND PR-head == release-source.
+ */
+export async function verifyRelease(releaseId: string): Promise<VerifyResult> {
+  const steps: VerifyStep[] = [];
+  const rel = await getRelease(releaseId);
+  if (!rel) {
+    return {
+      releaseId, version: null, repoId: null, pass: false, level: 0,
+      levelLabel: "unverified",
+      steps: [{ key: "exists", label: "Release object on-chain", ok: false, detail: "not found" }],
+    };
+  }
+  steps.push({ key: "exists", label: "Release object on-chain", ok: true, detail: rel.id });
+
+  // 2. blob availability
+  const [srcOk, artOk, repOk] = await Promise.all([
+    blobAvailable(rel.sourceSnapshot),
+    blobAvailable(rel.buildArtifact),
+    blobAvailable(rel.testReport),
+  ]);
+  steps.push({ key: "src", label: "Source snapshot on Walrus", ok: srcOk, detail: rel.sourceSnapshot });
+  steps.push({ key: "art", label: "Build artifact on Walrus", ok: artOk, detail: rel.buildArtifact });
+  steps.push({ key: "rep", label: "Test report on Walrus", ok: repOk, detail: rel.testReport });
+
+  // 3. treeHash integrity of the source manifest
+  const manifest = await fetchManifest(rel.sourceSnapshot);
+  const treeOk = manifest ? verifyTreeHash(manifest) : false;
+  steps.push({
+    key: "tree", label: "Source treeHash recomputes", ok: treeOk,
+    detail: manifest ? `${manifest.files.length} files · ${manifest.treeHash.slice(0, 12)}…` : "manifest unavailable",
+  });
+
+  // 4. find a merged PR whose head == release source (reviewed == released)
+  let chainOk = false;
+  let reviewedOk = false;
+  let chainDetail = "no merged PR matched the release source";
+  try {
+    // Cursor-paginate PrMerged so a release's PR isn't missed when the repo has
+    // more than one page of merges (correctness, not just the most-recent page).
+    const prIds: string[] = [];
+    let cursor: any = null;
+    do {
+      const page = await _vClient.queryEvents({
+        query: { MoveEventType: `${_vPkg}::pull_request::PrMerged` },
+        cursor, limit: 50, order: "descending",
+      });
+      for (const e of page.data) {
+        if ((e.parsedJson as any)?.repo_id !== rel.repoId) continue;
+        const id = (e.parsedJson as any)?.pr_id;
+        if (id) prIds.push(id as string);
+      }
+      cursor = page.nextCursor;
+      if (!page.hasNextPage || prIds.length >= 500) break;
+    } while (cursor);
+    for (const prId of prIds) {
+      const pr = await getPullRequest(prId).catch(() => null);
+      if (!pr) continue;
+      if (pr.headSnapshot === rel.sourceSnapshot) {
+        chainOk = true;
+        reviewedOk = (pr.reviewRefs?.length ?? 0) > 0;
+        chainDetail = `PR ${prId.slice(0, 10)}… head == release source` +
+          (reviewedOk ? ` · ${pr.reviewRefs.length} signed review(s)` : " · no review");
+        break;
+      }
+    }
+  } catch {
+    chainDetail = "could not scan merged PRs";
+  }
+  steps.push({ key: "reviewed", label: "Signed review in the chain", ok: reviewedOk, detail: reviewedOk ? chainDetail : "no signed review found" });
+  steps.push({ key: "chain", label: "Reviewed code == released code", ok: chainOk, detail: chainDetail });
+
+  // SLSA-style level
+  const baseOk = srcOk && artOk; // L1
+  let level = 0;
+  if (baseOk) level = 1;
+  if (baseOk && reviewedOk) level = 2;
+  if (baseOk && reviewedOk && treeOk && chainOk) level = 3;
+  const levelLabel = level === 0 ? "unverified" : `SLSA-style L${level}`;
+  const pass = steps.every((s) => s.ok);
+
+  return {
+    releaseId: rel.id, version: rel.version, repoId: rel.repoId,
+    pass, level, levelLabel, steps,
+  };
+}
+
 // ===== Writes (require an agent-signing context) =====
 
 export async function prCreate(args: {
@@ -109,8 +245,8 @@ export async function prCreate(args: {
     nowEpochMs: nowMs(),
   });
 
-  const archiveBlob = await storeBlob(archive);
-  const manifestBlob = await storeBlob(
+  const archiveBlob = await storeBlobAuto(archive);
+  const manifestBlob = await storeBlobAuto(
     JSON.stringify({ ...manifest, archiveBlob: archiveBlob.blobId }),
   );
 
@@ -132,6 +268,46 @@ export async function prCreate(args: {
   };
 }
 
+/** Publish a Playground app: store the app files on Walrus, anchor on-chain.
+   Lets an agent build + publish an app via MCP, with verifiable provenance. */
+export async function publishPlaygroundApp(args: {
+  ctx: ForgeContext;
+  name: string;
+  prompt: string;
+  category?: string;
+  files: FileInput[];
+  parent?: string | null;
+}) {
+  const { archive, manifest } = buildSnapshotFromMemory({
+    files: args.files,
+    name: args.name,
+    branch: "main",
+    previousSnapshot: args.parent ?? null,
+    nowEpochMs: nowMs(),
+  });
+  const archiveBlob = await storeBlobAuto(archive);
+  const manifestBlob = await storeBlobAuto(
+    JSON.stringify({ ...manifest, archiveBlob: archiveBlob.blobId, playground: { kind: "playground-app", prompt: args.prompt, category: args.category ?? "other", parent: args.parent ?? null } }),
+  );
+  const res = await publishApp(args.ctx, {
+    name: args.name,
+    prompt: args.prompt,
+    manifestBlob: manifestBlob.blobId,
+    archiveBlob: archiveBlob.blobId,
+    treeHash: manifest.treeHash,
+    category: args.category ?? "other",
+    parent: args.parent ?? null,
+  });
+  const appId = createdOfType(res, "::playground::PublishedApp")[0];
+  return {
+    appId,
+    manifestBlob: manifestBlob.blobId,
+    archiveBlob: archiveBlob.blobId,
+    url: blobUrl(manifestBlob.blobId),
+    txDigest: res.digest,
+  };
+}
+
 export async function reviewSubmit(args: {
   ctx: ForgeContext;
   repoId: string;
@@ -140,7 +316,7 @@ export async function reviewSubmit(args: {
   verdict: number; // 1 approve, 2 request-changes, 3 comment
   reportText: string;
 }) {
-  const reportBlob = await storeBlob(args.reportText);
+  const reportBlob = await storeBlobAuto(args.reportText);
   const reputationId = await findReputationLedger(args.repoId);
   if (!reputationId) throw new Error(`Reputation ledger not found for repo ${args.repoId}`);
   const res = await submitReviewAsAgent(args.ctx, {
@@ -159,7 +335,7 @@ export async function reviewSubmit(args: {
 }
 
 export async function artifactUpload(args: { content: string }) {
-  const blob = await storeBlob(args.content);
+  const blob = await storeBlobAuto(args.content);
   return { blobId: blob.blobId, url: blobUrl(blob.blobId) };
 }
 
@@ -182,7 +358,7 @@ export async function issueCreate(args: {
   title: string;
   body: string;
 }) {
-  const bodyBlob = await storeBlob(args.body);
+  const bodyBlob = await storeBlobAuto(args.body);
   const res = await openIssue(args.ctx, { repoId: args.repoId, title: args.title, bodyBlob: bodyBlob.blobId });
   const issueId = createdOfType(res, "::issue::Issue")[0];
   return { issueId, bodyBlob: bodyBlob.blobId, txDigest: res.digest };
@@ -193,7 +369,7 @@ export async function issueComment(args: {
   issueId: string;
   body: string;
 }) {
-  const bodyBlob = await storeBlob(args.body);
+  const bodyBlob = await storeBlobAuto(args.body);
   const res = await commentIssue(args.ctx, { issueId: args.issueId, bodyBlob: bodyBlob.blobId });
   return { bodyBlob: bodyBlob.blobId, txDigest: res.digest };
 }
@@ -213,9 +389,18 @@ export async function bountyList(args: { repoId: string }) {
   }));
 }
 
-export async function bountyClaim(args: { ctx: ForgeContext; bountyId: string }) {
-  const res = await claimBounty(args.ctx, { bountyId: args.bountyId });
+export async function bountyClaim(args: { ctx: ForgeContext; bountyId: string; repoId: string }) {
+  const reputationId = await findReputationLedger(args.repoId);
+  if (!reputationId) throw new Error(`Reputation ledger not found for repo ${args.repoId}`);
+  const res = await claimBounty(args.ctx, { bountyId: args.bountyId, reputationId });
   return { txDigest: res.digest };
+}
+
+export async function agentVouch(args: { ctx: ForgeContext; repoId: string; subject: string }) {
+  const reputationId = await findReputationLedger(args.repoId);
+  if (!reputationId) throw new Error(`Reputation ledger not found for repo ${args.repoId}`);
+  const res = await vouch(args.ctx, { reputationId, subject: args.subject });
+  return { reputationId, txDigest: res.digest };
 }
 
 export async function bountySubmit(args: {

@@ -1,9 +1,9 @@
 {
-  "name": "walrusforge-server",
+  "name": "signet-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "WalrusForge indexer + REST API (Sui events -> SQLite -> HTTP)",
+  "description": "Signet indexer + REST API (Sui events -> SQLite -> HTTP)",
   "scripts": {
     "dev": "node --experimental-sqlite --import tsx watch src/index.ts",
     "start": "node --experimental-sqlite --import tsx src/index.ts",

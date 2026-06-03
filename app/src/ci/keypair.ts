@@ -1,5 +1,5 @@
 /**
- * CI agent keypair for the WalrusForge CI worker.
+ * CI agent keypair for the Signet CI worker.
  *
  * The CI worker signs reviews as its own dedicated agent identity, supplied via
  * FORGE_CI_KEY (bech32 suiprivkey1...). Separate from FORGE_AGENT_KEY so the CI

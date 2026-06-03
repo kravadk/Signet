@@ -1,0 +1,54 @@
+name: Deploy web (Walrus Sites)
+
+# Auto-publish the static web SPA to Walrus Sites (testnet) on push to web/**.
+# Active only when SUI_DEPLOY_KEY is set in repo Secrets (testnet, funded SUI+WAL);
+# otherwise it no-ops. Set repo variable WALRUS_SITE_OBJECT to the existing site
+# object id (deployments.json -> testnet.walrusSite) to UPDATE it (stable subdomain);
+# leave it unset for a first-time publish.
+#
+# NOTE: site-builder install/flags vary by version — verify on the first real run.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "web/**"
+      - "scripts/deploy-walrus-site.sh"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.SUI_DEPLOY_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip notice (no key)
+        if: ${{ env.HAS_KEY != 'true' }}
+        run: echo "SUI_DEPLOY_KEY not set — add it (testnet, funded SUI+WAL) in repo Secrets to enable Walrus Sites auto-deploy. The web also deploys to any static host (see DEPLOY.md)."
+
+      - name: Install Sui + Walrus + site-builder
+        if: ${{ env.HAS_KEY == 'true' }}
+        run: |
+          set -euo pipefail
+          sui_url="https://github.com/MystenLabs/sui/releases/download/testnet-v1.73.0/sui-testnet-v1.73.0-ubuntu-x86_64.tgz"
+          curl -fsSL "$sui_url" -o /tmp/sui.tgz && tar -xzf /tmp/sui.tgz -C /tmp
+          sudo install -m 0755 "$(find /tmp -maxdepth 2 -type f -name sui | head -1)" /usr/local/bin/sui
+          # Walrus + site-builder testnet binaries (Mysten public bucket).
+          curl -fsSL https://storage.googleapis.com/mysten-walrus-binaries/walrus-testnet-latest-ubuntu-x86_64 -o /tmp/walrus
+          curl -fsSL https://storage.googleapis.com/mysten-walrus-binaries/site-builder-testnet-latest-ubuntu-x86_64 -o /tmp/site-builder
+          sudo install -m 0755 /tmp/walrus /usr/local/bin/walrus
+          sudo install -m 0755 /tmp/site-builder /usr/local/bin/site-builder
+          sui --version; walrus --version || true; site-builder --version || true
+
+      - name: Deploy to Walrus Sites
+        if: ${{ env.HAS_KEY == 'true' }}
+        env:
+          SUI_DEPLOY_KEY: ${{ secrets.SUI_DEPLOY_KEY }}
+          SITE_OBJECT: ${{ vars.WALRUS_SITE_OBJECT }}
+          EPOCHS: "30"
+        run: bash scripts/deploy-walrus-site.sh

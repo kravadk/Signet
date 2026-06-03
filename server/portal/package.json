@@ -1,0 +1,10 @@
+{
+  "name": "signet-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public portal: human URLs + Open Graph share cards + verified sandboxed render for published Playground apps.",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node index.mjs" },
+  "dependencies": { "@mysten/sui": "^1.18.0" }
+}

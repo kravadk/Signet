@@ -1,2 +1,2 @@
 # counter demo
-A tiny Move counter, versioned on WalrusForge.
+A tiny Move counter, versioned on Signet.

@@ -1,0 +1,177 @@
+name: CI
+
+# Sui-native CI: every push / PR runs the Move test suite and the TypeScript
+# typecheck. No backend, no DB — the proof of correctness is on-chain logic
+# (Move) plus the agent/CLI/MCP layer (TS). Green check = contracts pass + app
+# compiles, the same gates we run locally.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  move:
+    name: Move contracts (build + tests)
+    runs-on: ubuntu-latest
+    env:
+      SUI_VERSION: testnet-v1.73.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Sui CLI
+        id: cache-sui
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/sui
+          key: sui-${{ env.SUI_VERSION }}-ubuntu
+
+      - name: Install Sui CLI
+        if: steps.cache-sui.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local/bin
+          url="https://github.com/MystenLabs/sui/releases/download/${SUI_VERSION}/sui-${SUI_VERSION}-ubuntu-x86_64.tgz"
+          echo "Downloading $url"
+          curl -fsSL "$url" -o /tmp/sui.tgz
+          tar -xzf /tmp/sui.tgz -C /tmp
+          # The archive contains the `sui` binary (possibly under a subdir).
+          bin=$(find /tmp -maxdepth 2 -type f -name sui | head -1)
+          install -m 0755 "$bin" ~/.local/bin/sui
+
+      - name: Add Sui to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sui version
+        run: sui --version
+
+      - name: Build Move package
+        working-directory: move/signet
+        run: sui move build
+
+      - name: Run Move tests
+        working-directory: move/signet
+        run: sui move test
+
+  app:
+    name: App (typecheck + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install deps
+        working-directory: app
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: app
+        run: npm run typecheck
+
+      - name: Unit tests (snapshot/treeHash integrity core)
+        working-directory: app
+        run: npm test
+
+  # Read-only provenance check against the live testnet network. No keys needed
+  # (verify never signs). This is an INFORMATIONAL signal, not a hard gate:
+  # network/RPC flakiness or an intentionally-incomplete seeded release should
+  # not turn the whole CI red, so the job continues on error. Runs only on
+  # pushes to the main branches (skipped on PRs, incl. forks).
+  verify:
+    name: Provenance verify (testnet, informational)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install deps
+        working-directory: app
+        run: npm ci
+
+      - name: Verify the latest testnet release
+        working-directory: app
+        env:
+          FORGE_NETWORK: testnet
+        run: |
+          set -uo pipefail
+          rel="$(npm run --silent forge -- latest-release || true)"
+          if [ -z "$rel" ]; then
+            echo "No release found on testnet — skipping verify."
+            exit 0
+          fi
+          echo "Verifying release $rel"
+          npm run --silent forge -- verify --release "$rel"
+
+  server:
+    name: Server services (syntax + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax-check services
+        run: |
+          set -euo pipefail
+          for f in server/llm-proxy/index.mjs server/llm-proxy/lib.mjs \
+                   server/salt/index.mjs server/salt/lib.mjs \
+                   server/sponsor/index.mjs server/sponsor/lib.mjs \
+                   server/portal/index.mjs server/portal/lib.mjs; do node --check "$f"; done
+      - name: Unit tests — salt (no deps)
+        working-directory: server/salt
+        run: node --test
+      - name: Unit tests — sponsor (validateKind)
+        working-directory: server/sponsor
+        run: npm install --no-audit --no-fund && node --test sponsor.test.mjs
+      - name: Unit tests — portal (inliner)
+        working-directory: server/portal
+        run: npm install --no-audit --no-fund && node --test inliner.test.mjs
+      # The sponsor E2E sign-path test runs only when a funded testnet key is provided.
+      - name: E2E — sponsor sign path (optional)
+        if: ${{ secrets.SPONSOR_TEST_KEY != '' }}
+        working-directory: server/sponsor
+        env:
+          SPONSOR_TEST_KEY: ${{ secrets.SPONSOR_TEST_KEY }}
+        run: echo "SPONSOR_TEST_KEY present — (E2E hook reserved)"
+
+  web:
+    name: Web (syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax-check web modules
+        run: |
+          set -euo pipefail
+          for f in web/*.js; do node --check "$f"; done
+
+  docker:
+    name: Docker build (compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all stack images
+        run: docker compose build

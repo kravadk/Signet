@@ -1,0 +1,20 @@
+{
+  "name": "signet",
+  "private": true,
+  "type": "module",
+  "description": "Signet — agent-native release network + Playground on Sui + Walrus. Root orchestration.",
+  "scripts": {
+    "stack:up": "docker compose up --build",
+    "stack:down": "docker compose down",
+    "stack:logs": "docker compose logs -f",
+    "gen:web-config": "node scripts/gen-web-config.mjs",
+    "dev:all": "node scripts/gen-web-config.mjs && concurrently -k -n llm,sponsor,salt,portal,indexer,web \"npm --prefix server/llm-proxy start\" \"npm --prefix server/sponsor start\" \"npm --prefix server/salt start\" \"npm --prefix server/portal start\" \"npm --prefix server start\" \"npx serve web -l 8080\"",
+    "seed:gallery": "node --import tsx app/scripts/seed-playground.mjs",
+    "move:test": "sui move test --path move/signet"
+  },
+  "engines": { "node": ">=18" },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "serve": "^14.2.0"
+  }
+}

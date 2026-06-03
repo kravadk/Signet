@@ -1,5 +1,5 @@
 /**
- * Snapshot + manifest helpers for WalrusForge.
+ * Snapshot + manifest helpers for Signet.
  *
  * A "snapshot" is a deterministic, gzipped archive of a repo directory plus a
  * `manifest.json` describing the file tree and content hashes. Both the archive
@@ -58,7 +58,7 @@ function toPosix(p: string): string {
   return p.split(sep).join("/");
 }
 
-function sha256(bytes: Uint8Array): string {
+export function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 

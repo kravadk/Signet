@@ -1,0 +1,31 @@
+name: Renew Walrus blobs
+
+# Weekly: re-pin every published app's Walrus blobs so they don't expire.
+# Keyless on testnet (free publisher) — no secret required. Mainnet renewal
+# (paid, walrus CLI + WAL) stays manual.
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install deps
+        working-directory: app
+        run: npm ci
+      - name: Renew sweep (testnet)
+        working-directory: app
+        env:
+          FORGE_NETWORK: testnet
+        run: node --import tsx scripts/renew-sweep.mjs
