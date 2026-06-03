@@ -884,6 +884,7 @@ async function loadData() {
     STATE.reviewEvents = reviewEvents;
     STATE.vouchEvents = vouchEvents;
     STATE.bountyEvents = bountyEvents;
+    STATE.reliability = await withTimeout(loadReliability(), 12000, 'reliability').catch(() => new Map());
     STATE.loaded = true;
     renderReposView();
     renderPRsView('all');
@@ -1170,6 +1171,32 @@ function capMatchesScope(cap, scope) {
   return (cap.scopes & bits[scope]) === bits[scope];
 }
 
+/** Read the on-chain ReliabilityLedger (Table<address, AgentReliability>) into a
+    Map of address -> { disputed, expired }. Empty if the ledger isn't configured. */
+async function loadReliability() {
+  const m = new Map();
+  if (!CFG.reliabilityLedger) return m;
+  const led = await sui.getObject({ id: CFG.reliabilityLedger, options: { showContent: true } });
+  const tableId = led?.data?.content?.fields?.records?.fields?.id?.id;
+  if (!tableId) return m;
+  let cursor = null;
+  do {
+    const page = await sui.getDynamicFields({ parentId: tableId, cursor });
+    const ids = page.data.map((d) => d.objectId);
+    if (ids.length) {
+      const objs = await sui.multiGetObjects({ ids, options: { showContent: true } });
+      for (const o of objs) {
+        const f = o.data?.content?.fields;
+        if (!f) continue;
+        const v = f.value?.fields || f.value || {};
+        m.set(f.name, { disputed: Number(v.disputed || 0), expired: Number(v.expired || 0) });
+      }
+    }
+    cursor = page.hasNextPage ? page.nextCursor : null;
+  } while (cursor);
+  return m;
+}
+
 function agentSummary(addr) {
   const prs = STATE.prs.filter((p) => p.author === addr);
   const reviews = STATE.reviewEvents.filter((r) => r.reviewer === addr);
@@ -1181,12 +1208,16 @@ function agentSummary(addr) {
   const merged = prs.filter((p) => p.status === 1).length;
   const totalWork = opened + reviews.length + claimed.length;
   const completed = merged + reviews.length + paid.length;
-  // Disputed work is an SLA signal: bounties this agent claimed that are in dispute.
-  const disputed = bounties.filter((b) => b.status === 4).length;
+  // SLA signals from the on-chain ReliabilityLedger (falls back to 0 if absent);
+  // disputed also counts any live disputed-status bounties not yet in the ledger.
+  const rel = STATE.reliability?.get(addr) || { disputed: 0, expired: 0 };
+  const liveDisputed = bounties.filter((b) => b.status === 4).length;
+  const disputed = Math.max(rel.disputed, liveDisputed);
+  const expired = rel.expired;
   const reliability = totalWork ? completed / totalWork : 0;
   const recentTs = Math.max(0, ...prs.map((p) => p.ts || 0), ...reviews.map((r) => r.ts || 0), ...claimed.map((e) => e.ts || 0), ...paid.map((e) => e.ts || 0), ...vouches.map((e) => e.ts || 0));
   const repoIds = new Set([...prs.map((p) => p.repoId), ...reviews.map((r) => STATE.prs.find((p) => p.id === r.prId)?.repoId), ...bounties.map((b) => b.repoId)].filter(Boolean));
-  return { prs, reviews, vouches, claimed, paid, bounties, opened, merged, totalWork, completed, reliability, disputed, recentTs, repoIds };
+  return { prs, reviews, vouches, claimed, paid, bounties, opened, merged, totalWork, completed, reliability, disputed, expired, recentTs, repoIds };
 }
 
 function filteredAgents() {
@@ -1259,7 +1290,8 @@ function renderAgentsView() {
       '<div class="agent-market-row">' +
         '<span class="market-pill">scope ' + escapeHtml(cap ? scopeChips(cap.scopes).join(', ') || 'none' : 'none') + '</span>' +
         '<span class="market-pill">reliability ' + relPct + '%</span>' +
-        (summary.disputed > 0 ? '<span class="market-pill" data-tip="Claimed bounties currently in dispute">⚖ ' + summary.disputed + ' disputed</span>' : '') +
+        (summary.disputed > 0 ? '<span class="market-pill" data-tip="Disputed work (on-chain ReliabilityLedger)">⚖ ' + summary.disputed + ' disputed</span>' : '') +
+        (summary.expired > 0 ? '<span class="market-pill" data-tip="Bounties reclaimed past deadline (on-chain)">⏳ ' + summary.expired + ' expired</span>' : '') +
         '<span class="market-pill">repos ' + summary.repoIds.size + '</span>' +
         '<span class="market-pill">last ' + escapeHtml(last) + '</span>' +
       '</div>' +
