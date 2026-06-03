@@ -475,6 +475,13 @@ public fun tip_app_v2(app: &mut PublishedApp, treasury: &mut Treasury, payment: 
     event::emit(AppTipped { app_id: object::id(app), from: ctx.sender(), amount: amount - fee, fee });
 }
 
+/// Deposit a coin into the protocol treasury. Used by other modules (e.g. bounty
+/// fees) to route protocol revenue here consistently instead of refunding the
+/// funder. Anyone may contribute.
+public fun deposit_fee(treasury: &mut Treasury, c: Coin<SUI>) {
+    balance::join(&mut treasury.balance, coin::into_balance(c));
+}
+
 /// Admin withdraws accrued protocol fees from the Treasury.
 public fun withdraw_treasury(treasury: &mut Treasury, amount: u64, ctx: &mut TxContext) {
     assert!(ctx.sender() == treasury.admin, ENotAdmin);

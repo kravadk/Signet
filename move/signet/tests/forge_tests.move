@@ -4,6 +4,7 @@ module signet::forge_tests;
 use std::string;
 use sui::test_scenario::{Self as ts, Scenario};
 use sui::coin;
+use sui::clock;
 use sui::object::{Self, ID};
 use sui::sui::SUI;
 use signet::forge::{Self, ForgeRegistry, Repository, RepoOwnerCap, AgentCap};
@@ -11,7 +12,8 @@ use signet::reputation::{Self, RepoReputation};
 use signet::pull_request::{Self as pr, PullRequest};
 use signet::release::{Self, Release, ReleaseLink};
 use signet::issue::{Self, Issue};
-use signet::bounty::{Self, Bounty, BountyDispute};
+use signet::bounty::{Self, Bounty, BountyDispute, BountyTerms};
+use signet::playground::{Self, Treasury};
 
 const OWNER: address = @0xA;
 const AGENT: address = @0xB;
@@ -513,6 +515,96 @@ fun test_bounty_dispute_only_party() {
         let mut b = scen.take_shared<Bounty>();
         bounty::open_dispute(&mut b, s(b"meddling"), scen.ctx());
         ts::return_shared(b);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_bounty_v2_treasury_approve() {
+    let mut scen = setup();
+    // Create the protocol treasury.
+    scen.next_tx(OWNER);
+    {
+        playground::create_treasury(OWNER, scen.ctx());
+    };
+    // Funder posts a v2 bounty (no deadline, proof required), 1000 MIST.
+    scen.next_tx(FUNDER);
+    {
+        let repo = scen.take_shared<Repository>();
+        let payment = coin::mint_for_testing<SUI>(1000, scen.ctx());
+        bounty::post_bounty_v2(&repo, s(b"ship it"), payment, 0, 0, true, scen.ctx());
+        ts::return_shared(repo);
+    };
+    // Agent claims + submits proof.
+    scen.next_tx(AGENT);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        bounty::submit_bounty(&mut b, s(b"pr_done"), scen.ctx());
+        ts::return_shared(rep);
+        ts::return_shared(b);
+    };
+    // Funder approves v2 -> fee routes to Treasury (25), claimant gets 975.
+    scen.next_tx(FUNDER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let terms = scen.take_shared<BountyTerms>();
+        let mut treasury = scen.take_shared<Treasury>();
+        bounty::approve_bounty_v2(&mut b, &terms, &mut treasury, scen.ctx());
+        assert!(bounty::bounty_status(&b) == bounty::status_paid(), 730);
+        assert!(playground::treasury_balance(&treasury) == 25, 731);
+        ts::return_shared(treasury);
+        ts::return_shared(terms);
+        ts::return_shared(b);
+    };
+    scen.next_tx(AGENT);
+    {
+        let paid = scen.take_from_sender<coin::Coin<SUI>>();
+        assert!(coin::value(&paid) == 975, 732);
+        scen.return_to_sender(paid);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_bounty_v2_deadline_cancel() {
+    let mut scen = setup();
+    // Funder posts a v2 bounty with a deadline at t=1000ms, 500 MIST.
+    scen.next_tx(FUNDER);
+    {
+        let repo = scen.take_shared<Repository>();
+        let payment = coin::mint_for_testing<SUI>(500, scen.ctx());
+        bounty::post_bounty_v2(&repo, s(b"deadline job"), payment, 0, 1000, false, scen.ctx());
+        ts::return_shared(repo);
+    };
+    // Agent claims but never delivers.
+    scen.next_tx(AGENT);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        ts::return_shared(rep);
+        ts::return_shared(b);
+    };
+    // After the deadline, funder reclaims via cancel_expired.
+    scen.next_tx(FUNDER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let terms = scen.take_shared<BountyTerms>();
+        let mut clk = clock::create_for_testing(scen.ctx());
+        clock::set_for_testing(&mut clk, 2000);
+        bounty::cancel_expired(&mut b, &terms, &clk, scen.ctx());
+        assert!(bounty::bounty_status(&b) == bounty::status_cancelled(), 740);
+        clock::destroy_for_testing(clk);
+        ts::return_shared(terms);
+        ts::return_shared(b);
+    };
+    scen.next_tx(FUNDER);
+    {
+        let refund = scen.take_from_sender<coin::Coin<SUI>>();
+        assert!(coin::value(&refund) == 500, 741);
+        scen.return_to_sender(refund);
     };
     scen.end();
 }

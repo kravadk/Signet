@@ -12,8 +12,10 @@ use sui::balance::{Self, Balance};
 use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::event;
+use sui::clock::{Self, Clock};
 use signet::forge::{Self, Repository, RepoOwnerCap};
 use signet::reputation::{Self, RepoReputation};
+use signet::playground::{Self, Treasury};
 
 // ===== Errors =====
 
@@ -28,6 +30,10 @@ const ENotParty: u64 = 7;        // dispute opener is neither funder nor claiman
 const EDisputeResolved: u64 = 8; // dispute already arbitrated
 const EBadBps: u64 = 9;          // payout split out of range
 const EDisputeMismatch: u64 = 10; // dispute does not belong to this bounty
+const EProofRequired: u64 = 11;  // approve_v2 needs submitted proof but none present
+const ENoDeadline: u64 = 12;     // cancel_expired on a bounty with no deadline
+const EDeadlineNotPassed: u64 = 13; // cancel_expired before the deadline
+const ETermsMismatch: u64 = 14;  // terms object does not belong to this bounty
 
 // ===== Status =====
 
@@ -84,16 +90,28 @@ public struct BountyPaid has copy, drop {
 }
 public struct BountyCancelled has copy, drop { bounty_id: ID }
 
+/// Optional terms for a bounty (companion object; keeps `Bounty` layout stable).
+public struct BountyTerms has key {
+    id: UID,
+    bounty_id: ID,
+    /// Absolute Unix ms deadline by which work must be delivered (0 = no deadline).
+    deadline_ms: u64,
+    /// Whether a proof submission is required before the funder may approve.
+    proof_required: bool,
+}
+public struct BountyTermsSet has copy, drop { bounty_id: ID, deadline_ms: u64, proof_required: bool }
+public struct BountyExpired has copy, drop { bounty_id: ID }
+
 // ===== Post / claim / submit / approve / cancel =====
 
-/// Post a bounty against a repo, locking `payment` in escrow.
-public fun post_bounty(
+/// Build + emit a funded bounty (shared by v1 and v2 post paths). Returns the id.
+fun build_bounty(
     repo: &Repository,
     title: String,
     payment: Coin<SUI>,
     min_score: u64,
     ctx: &mut TxContext,
-) {
+): ID {
     let amount = coin::value(&payment);
     assert!(amount > 0, EZeroAmount);
     let bounty = Bounty {
@@ -108,8 +126,9 @@ public fun post_bounty(
         proof: option::none(),
         min_score,
     };
+    let bounty_id = object::id(&bounty);
     event::emit(BountyPosted {
-        bounty_id: object::id(&bounty),
+        bounty_id,
         repo_id: bounty.repo_id,
         funder: bounty.funder,
         amount,
@@ -117,6 +136,42 @@ public fun post_bounty(
         min_score,
     });
     transfer::share_object(bounty);
+    bounty_id
+}
+
+/// Post a bounty against a repo, locking `payment` in escrow.
+public fun post_bounty(
+    repo: &Repository,
+    title: String,
+    payment: Coin<SUI>,
+    min_score: u64,
+    ctx: &mut TxContext,
+) {
+    build_bounty(repo, title, payment, min_score, ctx);
+}
+
+/// Post a bounty with explicit terms: a `deadline_ms` (absolute Unix ms; 0 = none)
+/// by which the work must be delivered, and whether a proof submission is required
+/// before approval. Creates a companion `BountyTerms` object (upgrade-safe — the
+/// `Bounty` layout is unchanged).
+public fun post_bounty_v2(
+    repo: &Repository,
+    title: String,
+    payment: Coin<SUI>,
+    min_score: u64,
+    deadline_ms: u64,
+    proof_required: bool,
+    ctx: &mut TxContext,
+) {
+    let bounty_id = build_bounty(repo, title, payment, min_score, ctx);
+    let terms = BountyTerms {
+        id: object::new(ctx),
+        bounty_id,
+        deadline_ms,
+        proof_required,
+    };
+    event::emit(BountyTermsSet { bounty_id, deadline_ms, proof_required });
+    transfer::share_object(terms);
 }
 
 /// Claim an open bounty. The claimant commits to delivering the work. If the
@@ -181,6 +236,62 @@ public fun cancel_bounty(bounty: &mut Bounty, ctx: &mut TxContext) {
     bounty.status = STATUS_CANCELLED;
     event::emit(BountyCancelled { bounty_id: object::id(bounty) });
 }
+
+// ===== Treasury-backed approval + deadline (v2, upgrade-safe) =====
+
+/// Approve work and release escrow to the claimant, routing the protocol fee to
+/// the shared Treasury (consistent protocol revenue, vs v1 which refunds the
+/// funder). Funder-only. If the terms require proof, a submission must be present.
+public fun approve_bounty_v2(
+    bounty: &mut Bounty,
+    terms: &BountyTerms,
+    treasury: &mut Treasury,
+    ctx: &mut TxContext,
+) {
+    assert!(bounty.funder == ctx.sender(), ENotFunder);
+    assert!(bounty.status == STATUS_CLAIMED, ENotClaimed);
+    assert!(terms.bounty_id == object::id(bounty), ETermsMismatch);
+    if (terms.proof_required) { assert!(option::is_some(&bounty.proof), EProofRequired); };
+    let claimant = *option::borrow(&bounty.claimant);
+
+    let total = balance::value(&bounty.escrow);
+    let fee = total * FEE_BPS / 10000;
+    let payout = total - fee;
+
+    let payout_coin = coin::take(&mut bounty.escrow, payout, ctx);
+    transfer::public_transfer(payout_coin, claimant);
+    if (fee > 0) {
+        let fee_coin = coin::take(&mut bounty.escrow, fee, ctx);
+        playground::deposit_fee(treasury, fee_coin);
+    };
+    bounty.status = STATUS_PAID;
+    event::emit(BountyPaid { bounty_id: object::id(bounty), claimant, paid: payout, fee });
+}
+
+/// Reclaim a CLAIMED bounty whose deadline passed without approval. Funder-only;
+/// refunds the full escrow and cancels. Requires the bounty's `BountyTerms` and a
+/// Clock.
+public fun cancel_expired(
+    bounty: &mut Bounty,
+    terms: &BountyTerms,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(bounty.funder == ctx.sender(), ENotFunder);
+    assert!(terms.bounty_id == object::id(bounty), ETermsMismatch);
+    assert!(bounty.status == STATUS_CLAIMED, ENotClaimed);
+    assert!(terms.deadline_ms > 0, ENoDeadline);
+    assert!(clock::timestamp_ms(clock) > terms.deadline_ms, EDeadlineNotPassed);
+    let total = balance::value(&bounty.escrow);
+    let refund = coin::take(&mut bounty.escrow, total, ctx);
+    transfer::public_transfer(refund, bounty.funder);
+    bounty.status = STATUS_CANCELLED;
+    event::emit(BountyExpired { bounty_id: object::id(bounty) });
+}
+
+public fun terms_bounty(t: &BountyTerms): ID { t.bounty_id }
+public fun terms_deadline_ms(t: &BountyTerms): u64 { t.deadline_ms }
+public fun terms_proof_required(t: &BountyTerms): bool { t.proof_required }
 
 // ===== Dispute / arbitration (upgrade-safe companion object) =====
 //
@@ -260,6 +371,57 @@ public fun resolve_dispute(
     if (fee > 0) {
         let fee_coin = coin::take(&mut bounty.escrow, fee, ctx);
         transfer::public_transfer(fee_coin, bounty.funder);
+    };
+    let refunded = balance::value(&bounty.escrow);
+    if (refunded > 0) {
+        let refund_coin = coin::take(&mut bounty.escrow, refunded, ctx);
+        transfer::public_transfer(refund_coin, bounty.funder);
+    };
+
+    bounty.status = STATUS_PAID;
+    dispute.resolved = true;
+    dispute.payout_bps = payout_bps;
+    event::emit(DisputeResolved {
+        dispute_id: object::id(dispute),
+        bounty_id: object::id(bounty),
+        payout_bps,
+        paid,
+        refunded,
+        fee,
+    });
+}
+
+/// Same as `resolve_dispute`, but routes the protocol fee to the shared Treasury
+/// instead of the funder (consistent protocol revenue).
+public fun resolve_dispute_v2(
+    bounty: &mut Bounty,
+    dispute: &mut BountyDispute,
+    repo: &Repository,
+    cap: &RepoOwnerCap,
+    treasury: &mut Treasury,
+    payout_bps: u64,
+    ctx: &mut TxContext,
+) {
+    forge::assert_owner(repo, cap);
+    assert!(object::id(repo) == bounty.repo_id, EDisputeMismatch);
+    assert!(dispute.bounty_id == object::id(bounty), EDisputeMismatch);
+    assert!(!dispute.resolved, EDisputeResolved);
+    assert!(bounty.status == STATUS_DISPUTED, ENotClaimed);
+    assert!(payout_bps <= 10000, EBadBps);
+    let claimant = *option::borrow(&bounty.claimant);
+
+    let total = balance::value(&bounty.escrow);
+    let award = total * payout_bps / 10000;
+    let fee = award * FEE_BPS / 10000;
+    let paid = award - fee;
+
+    if (paid > 0) {
+        let payout_coin = coin::take(&mut bounty.escrow, paid, ctx);
+        transfer::public_transfer(payout_coin, claimant);
+    };
+    if (fee > 0) {
+        let fee_coin = coin::take(&mut bounty.escrow, fee, ctx);
+        playground::deposit_fee(treasury, fee_coin);
     };
     let refunded = balance::value(&bounty.escrow);
     if (refunded > 0) {
