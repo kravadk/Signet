@@ -84,6 +84,13 @@
         <span class="count" id="navReleaseCount">·</span>
       </div>
 
+      <div class="nav-item" data-nav="packages">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/>
+        </svg>
+        <span class="label-txt">Packages</span>
+      </div>
+
       <div class="nav-item" data-nav="agents">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/>
@@ -385,6 +392,11 @@
             <h2>Agent Reputation</h2>
             <div id="repList"></div>
           </section>
+
+          <section class="panel buying">
+            <h2>Sponsor Dashboard</h2>
+            <div id="sponsorDash"><div class="empty-state">Sponsor not configured.</div></div>
+          </section>
         </div>
       </div>
      </div><!-- /view-dashboard -->
@@ -407,11 +419,47 @@
        <div id="releasesList"><div class="empty-state">Loading…</div></div>
      </div>
 
-     <!-- ===== AGENTS ===== -->
-     <div class="view" id="view-agents" style="display:none">
-       <div class="view-head"><h1>Agents</h1><p>Delegated identities acting under a scoped, revocable <span class="mono">AgentCap</span>. Reputation accrues from real signed actions.</p></div>
-       <div class="card-grid" id="agentsGrid"><div class="empty-state">Loading…</div></div>
-     </div>
+      <!-- ===== AGENTS ===== -->
+      <div class="view" id="view-agents" style="display:none">
+        <div class="view-head"><h1>Agent Marketplace</h1><p>Delegated identities acting under scoped, revocable <span class="mono">AgentCap</span>s. Filter by scope, score, activity and reliability; click an agent to inspect its verifiable memory vault.</p></div>
+        <div class="market-toolbar">
+          <label class="market-search">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+            <input id="agentSearch" placeholder="Search address or name" autocomplete="off" />
+          </label>
+          <select class="market-select" id="agentScope">
+            <option value="all">Any scope</option>
+            <option value="open_pr">open_pr</option>
+            <option value="review">review</option>
+            <option value="run_ci">run_ci</option>
+            <option value="active">active cap</option>
+          </select>
+          <select class="market-select" id="agentScore">
+            <option value="0">Any score</option>
+            <option value="5">score >= 5</option>
+            <option value="20">score >= 20</option>
+            <option value="50">score >= 50</option>
+          </select>
+          <select class="market-select" id="agentReliability">
+            <option value="all">Any reliability</option>
+            <option value="0.5">reliability >= 50%</option>
+            <option value="0.8">reliability >= 80%</option>
+          </select>
+          <select class="market-select" id="agentRecent">
+            <option value="all">Any activity</option>
+            <option value="active">active reputation epoch</option>
+            <option value="cap">has AgentCap</option>
+          </select>
+        </div>
+        <div class="market-summary" id="agentMarketSummary">Loading...</div>
+        <div class="card-grid" id="agentsGrid"><div class="empty-state">Loading…</div></div>
+      </div>
+
+      <!-- ===== PACKAGES ===== -->
+      <div class="view" id="view-packages" style="display:none">
+        <div class="view-head"><h1>Package Trust</h1><p>Trust verdict for the active Signet package: package id, MVR alias status, verified releases, dependencies, maintainer anchors and risk badge.</p></div>
+        <div id="packageTrust"><div class="empty-state">Loading...</div></div>
+      </div>
 
      <!-- ===== TRUST MODEL ===== -->
      <div class="view" id="view-trust" style="display:none">

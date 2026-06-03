@@ -278,6 +278,7 @@ program
   .requiredOption("--tag <v>", "version tag, e.g. v0.1.0")
   .requiredOption("--artifact <file>", "build artifact file")
   .requiredOption("--report <file>", "test report file")
+  .option("--pr <id>", "merged PR id to hard-link into the release (preferred v2 path)")
   .option("-d, --dir <dir>", "repo dir", ".")
   .action(async (opts) => {
     const ctx = makeContext(NET);
@@ -293,9 +294,11 @@ program
       sourceSnapshot: s.currentManifestBlob,
       buildArtifact: artifactBlob.blobId,
       testReport: reportBlob.blobId,
+      mergedPrId: opts.pr,
     });
     const releaseId = createdOfType(res, "::release::Release")[0];
     console.log(`✓ release ${opts.tag} published: ${releaseId}`);
+    if (opts.pr) console.log(`  merged PR: ${opts.pr}`);
     console.log(`  source:   ${blobUrl(s.currentManifestBlob)}`);
     console.log(`  artifact: ${blobUrl(artifactBlob.blobId)}`);
     console.log(`  report:   ${blobUrl(reportBlob.blobId)}`);
@@ -402,6 +405,23 @@ program
     console.log(`\n  level: ${r.levelLabel}`);
     console.log(r.pass ? `\n✓ PASS — provenance chain verified\n` : `\n✗ FAIL — provenance chain incomplete\n`);
     if (!r.pass) process.exit(2);
+  });
+
+program
+  .command("attestation")
+  .description("Export an in-toto/SLSA-style JSON statement for a Signet release")
+  .requiredOption("--release <releaseId>", "Release object id to export")
+  .option("--out <file>", "write JSON to a file instead of stdout")
+  .action(async (opts) => {
+    const { releaseAttestation } = await import("../lib/actions.js");
+    const att = await releaseAttestation({ releaseId: opts.release });
+    const json = JSON.stringify(att, null, 2);
+    if (opts.out) {
+      writeFileSync(opts.out, json + "\n");
+      console.log(`attestation written: ${opts.out}`);
+    } else {
+      console.log(json);
+    }
   });
 
 program

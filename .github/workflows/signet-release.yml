@@ -1,0 +1,239 @@
+name: Signet release
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: Sui network
+        required: true
+        default: testnet
+        type: choice
+        options: [testnet, mainnet]
+      repo_id:
+        description: Signet Repository object id
+        required: true
+        type: string
+      owner_cap_id:
+        description: RepoOwnerCap object id held by FORGE_OWNER_KEY
+        required: true
+        type: string
+      reputation_id:
+        description: RepoReputation object id
+        required: true
+        type: string
+      repo_name:
+        description: Signet repo name for the snapshot manifest
+        required: true
+        type: string
+      branch:
+        description: Snapshot branch label
+        required: true
+        default: main
+        type: string
+      tag:
+        description: Release tag, for example v1.2.3
+        required: true
+        type: string
+      merged_pr_id:
+        description: Merged Signet PR id to hard-link into the release
+        required: true
+        type: string
+      artifact_path:
+        description: Build artifact file to store on Walrus
+        required: true
+        default: .signet/artifact.tgz
+        type: string
+      report_path:
+        description: CI/test report file to store on Walrus
+        required: true
+        default: .signet/report.txt
+        type: string
+      current_manifest_blob:
+        description: Optional previous/current Signet manifest blob for snapshot lineage
+        required: false
+        default: ""
+        type: string
+      github_artifact_name:
+        description: Optional Actions artifact containing artifact_path/report_path files
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      network:
+        required: false
+        default: testnet
+        type: string
+      repo_id:
+        required: true
+        type: string
+      owner_cap_id:
+        required: true
+        type: string
+      reputation_id:
+        required: true
+        type: string
+      repo_name:
+        required: true
+        type: string
+      branch:
+        required: false
+        default: main
+        type: string
+      tag:
+        required: true
+        type: string
+      merged_pr_id:
+        required: true
+        type: string
+      artifact_path:
+        required: false
+        default: .signet/artifact.tgz
+        type: string
+      report_path:
+        required: false
+        default: .signet/report.txt
+        type: string
+      current_manifest_blob:
+        required: false
+        default: ""
+        type: string
+      github_artifact_name:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      FORGE_OWNER_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signet-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Signet provenance release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.check.outputs.release_id }}
+      pr_id: ${{ steps.check.outputs.pr_id }}
+      tree_hash: ${{ steps.check.outputs.tree_hash }}
+      verification_level: ${{ steps.check.outputs.verification_level }}
+      verification_pass: ${{ steps.check.outputs.verification_pass }}
+    env:
+      FORGE_NETWORK: ${{ inputs.network }}
+      FORGE_OWNER_KEY: ${{ secrets.FORGE_OWNER_KEY }}
+      SIGNET_REPO_ID: ${{ inputs.repo_id }}
+      SIGNET_OWNER_CAP_ID: ${{ inputs.owner_cap_id }}
+      SIGNET_REPUTATION_ID: ${{ inputs.reputation_id }}
+      SIGNET_REPO_NAME: ${{ inputs.repo_name }}
+      SIGNET_BRANCH: ${{ inputs.branch }}
+      SIGNET_TAG: ${{ inputs.tag }}
+      SIGNET_MERGED_PR_ID: ${{ inputs.merged_pr_id }}
+      SIGNET_ARTIFACT_PATH: ${{ inputs.artifact_path }}
+      SIGNET_REPORT_PATH: ${{ inputs.report_path }}
+      SIGNET_CURRENT_MANIFEST_BLOB: ${{ inputs.current_manifest_blob }}
+      SIGNET_GITHUB_ARTIFACT_NAME: ${{ inputs.github_artifact_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download prepared release inputs
+        if: ${{ inputs.github_artifact_name != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.github_artifact_name }}
+          path: .signet
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Signet CLI dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Write Signet state
+        run: |
+          set -euo pipefail
+          mkdir -p .forge
+          node - <<'JS'
+          const fs = require("node:fs");
+          const state = {
+            network: process.env.FORGE_NETWORK || "testnet",
+            name: process.env.SIGNET_REPO_NAME,
+            branch: process.env.SIGNET_BRANCH || "main",
+            repoId: process.env.SIGNET_REPO_ID,
+            ownerCapId: process.env.SIGNET_OWNER_CAP_ID,
+            reputationId: process.env.SIGNET_REPUTATION_ID,
+            currentSnapshot: "",
+            currentManifestBlob: process.env.SIGNET_CURRENT_MANIFEST_BLOB || "",
+          };
+          fs.writeFileSync(".forge/state.json", JSON.stringify(state, null, 2));
+          JS
+
+      - name: Build default artifact and report if missing
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$SIGNET_ARTIFACT_PATH")" "$(dirname "$SIGNET_REPORT_PATH")"
+          if [ ! -f "$SIGNET_REPORT_PATH" ]; then
+            {
+              echo "Signet GitHub release report"
+              echo "repo=$GITHUB_REPOSITORY"
+              echo "sha=$GITHUB_SHA"
+              echo "run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo "generated_at=$(date -u +%FT%TZ)"
+            } > "$SIGNET_REPORT_PATH"
+          fi
+          if [ ! -f "$SIGNET_ARTIFACT_PATH" ]; then
+            tar --exclude=.git --exclude=node_modules --exclude=.forge --exclude=.signet -czf "$SIGNET_ARTIFACT_PATH" .
+          fi
+
+      - name: Snapshot repository to Walrus
+        id: snapshot
+        run: |
+          set -euo pipefail
+          out="$(npm --prefix app run --silent forge -- push-snapshot --dir "$GITHUB_WORKSPACE" 2>&1)"
+          printf '%s\n' "$out"
+          manifest="$(printf '%s\n' "$out" | awk '/manifest:/ {print $2; exit}')"
+          if [ -z "$manifest" ]; then
+            echo "Could not parse manifest blob from push-snapshot output" >&2
+            exit 1
+          fi
+          echo "manifest_blob=$manifest" >> "$GITHUB_OUTPUT"
+          echo "SIGNET_SNAPSHOT_BLOB=$manifest" >> "$GITHUB_ENV"
+
+      - name: Publish Signet release
+        id: release
+        run: |
+          set -euo pipefail
+          out="$(npm --prefix app run --silent forge -- release \
+            --dir "$GITHUB_WORKSPACE" \
+            --tag "$SIGNET_TAG" \
+            --artifact "$SIGNET_ARTIFACT_PATH" \
+            --report "$SIGNET_REPORT_PATH" \
+            --pr "$SIGNET_MERGED_PR_ID" 2>&1)"
+          printf '%s\n' "$out"
+          release_id="$(printf '%s\n' "$out" | awk '/published:/ {print $NF; exit}')"
+          if [ -z "$release_id" ]; then
+            echo "Could not parse release id from forge release output" >&2
+            exit 1
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "SIGNET_RELEASE_ID=$release_id" >> "$GITHUB_ENV"
+
+      - name: Verify release
+        run: npm --prefix app run --silent forge -- verify --release "$SIGNET_RELEASE_ID"
+
+      - name: Emit GitHub check outputs
+        id: check
+        run: |
+          node --import tsx app/scripts/github-signet-check.mjs \
+            --network "$FORGE_NETWORK" \
+            --release "$SIGNET_RELEASE_ID" \
+            --pr "$SIGNET_MERGED_PR_ID" \
+            --snapshot "${{ steps.snapshot.outputs.manifest_blob }}"

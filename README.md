@@ -78,7 +78,7 @@ instantly in a sandboxed `<iframe>` preview, and you publish it on-chain.
 | Handles | `NameRegistry`: claim a unique `@handle` (one/address); shown instead of an address |
 | Monetization | `tip_app_v2` routes a 2.5% fee to an on-chain `Treasury`; **app bounties** escrow SUI for an app you want built |
 | Paid fork | `set_fork_price` / `pay_to_fork` — a builder charges to remix their app; the fee (minus 2.5%) is paid to them on-chain, the remix is licensed atomically |
-| Private apps | `set_private` + **Seal** policy `seal_approve_app_owner` — the archive is client-encrypted; **only the builder can decrypt**, enforced on-chain |
+| Private apps | `set_private` + **Seal** policy `seal_approve_app_owner`; v2 adds `WorkspaceRegistry` + `seal_approve_app_member` so builders can allowlist collaborators without changing old owner-only apps |
 | Durable storage | choose epochs at publish; **⏳ Renew** re-pins bytes (content-addressed → on-chain id never changes) |
 | Real share URL | `viewer.html?app=<id>&net=<net>` — fetches from Walrus + re-verifies the tree-hash |
 | Per-app Walrus Site | optional: mint a real `Site` object via the Walrus Sites package |
@@ -131,8 +131,10 @@ Reputation and permissions are **contract checks, not server policy**:
 - **Builder reputation (Playground)** — `BuilderBoard`, credited on publish/star/remix.
 - **Community moderation (Playground)** — `FlagRegistry`, flag/hide enforced on-chain.
 - **In-place versioning / handles / Treasury / app-bounties / paid-fork (Playground)** — all on-chain (above).
-- **Private apps (Playground, Seal)** — `set_private` + `seal_approve_app_owner`; the app archive is
-  client-encrypted and only the builder can decrypt it, gated on-chain.
+- **Private apps (Playground, Seal)** — `set_private` + `seal_approve_app_owner` remains the
+  backward-compatible default. Team-private v2 adds `WorkspaceRegistry`,
+  `invite_workspace_member` / `revoke_workspace_member`, and `seal_approve_app_member`, so an
+  app builder can allowlist collaborators while old private apps stay owner-only.
 - **Private agent memory (Seal)** — private repo snapshots and encrypted review notes live on
   Walrus encrypted with **Seal**; key servers call `forge::seal_approve_owner` /
   `seal_approve_agent`, which abort unless the requester holds a cap for the repo whose object-id
@@ -194,7 +196,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/signet/      Sui Move contracts (the trust layer) — 7 modules, 53 tests
+move/signet/      Sui Move contracts (the trust layer) — 7 modules, 55 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -208,8 +210,8 @@ move/signet/      Sui Move contracts (the trust layer) — 7 modules, 53 tests
                          · NameRegistry (@handles) · Treasury (tip_app_v2 / withdraw_treasury)
                          · update_app (versioning) · publish_remix_v3 · AppBounty (post/award/cancel)
                          · ForkRegistry (set_fork_price / pay_to_fork) · PrivacyRegistry
-                         · seal_approve_app_owner (Seal owner-only private apps)
-  tests/                 53 tests across forge + playground
+                         · seal_approve_app_owner / seal_approve_app_member (Seal private apps)
+  tests/                 55 tests across forge + playground
 
 app/                   TypeScript CLI + SDK + MCP server + CI worker
   src/lib/*.ts           walrus / snapshot / sui (PTBs) / forge-read / actions (verifyRelease)
@@ -229,7 +231,7 @@ web/                   Static SPA — no backend, no build step (ES modules via 
   index.html             SPA shell; Playground default, then 11 release-network tabs
   playground.js          chat → LLM → snapshot → publish → gallery → remix/update/renew →
                          tip → app bounties → paid-fork → private apps → @handle → share/viewer
-  seal.js                Seal owner-only encrypt/decrypt for private apps (lazy-loaded)
+  seal.js                Seal encrypt/decrypt for builder or allowlisted private app members
   zklogin.js             Sign in with Google (zkLogin), sponsor-aware execution
   wallet.js              wallet-standard connect/sign (sponsored + zkLogin aware) + SuiNS
   viewer.html            renders a published app from Walrus + re-verifies its tree-hash
@@ -276,7 +278,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 ### Contracts
 ```sh
 cd move/signet
-sui move test          # 53/53 pass
+sui move test          # 55/55 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
 
@@ -309,11 +311,12 @@ npm i -g @signet/cli && forge <command>   # or global `forge` / `signet`
 | `forge open-pr --cap <id> --title <t> --dir <path>` | agent opens a PR from a snapshot |
 | `forge review --cap <id> --pr <id> --report <file>` | submit a signed review (APPROVE/REJECT) |
 | `forge merge --pr <id>` | owner merges (aborts below `min_approvals`) |
-| `forge release --tag <v> --artifact <file> --report <file>` | publish a release |
+| `forge release --tag <v> --artifact <file> --report <file> [--pr <merged-pr-id>]` | publish a release; `--pr` records the v2 direct PR → release link |
 | `forge set-approvals --n <k>` | require k APPROVE reviews before merge |
 | `forge vouch --subject <addr>` | raise an agent's trust score |
 | `forge verify --release <id>` | independent provenance check (no key) — prints SLSA level |
-| `forge latest-release --repo <id>` | resolve the newest release for a repo |
+| `forge attestation --release <id> [--out file.json]` | export an in-toto/SLSA-style release statement |
+| `forge latest-release` | resolve the newest release on the active network |
 | `forge doctor` | environment / config health check |
 | `forge status` | repos / PRs / releases overview |
 
@@ -391,9 +394,12 @@ cd server/llm-proxy && ANTHROPIC_API_KEY=sk-ant-... npm start   # :8787
 Co-signs gas for **value-free** playground calls only (record_visit, star, flag, set_hidden,
 claim_name, publish, update); rejects value-moving calls (tip/bounty/withdraw) and anything
 off-package. Verified end-to-end on testnet (empty wallet acted on-chain; value-moving rejected).
+Adds per-IP, per-wallet, per-function and daily-budget quotas plus `/dashboard` for sponsor
+balance, estimated spend, rejected calls and rate-limit hits. Sponsored publish/update/remix can
+run open, allowlisted, or stake/balance-gated.
 ```sh
 cd server/sponsor && npm install
-SPONSOR_PRIVATE_KEY=suiprivkey1... ALLOWED_PACKAGES=0x77dcd2cf... npm start   # :8788
+SPONSOR_PRIVATE_KEY=suiprivkey1... ALLOWED_PACKAGES=0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e npm start   # :8788
 ```
 
 ### `server/salt` + `web/zklogin.js` — sign in with Google (no wallet)
@@ -415,6 +421,34 @@ cd server/portal && npm install && PUBLIC_ORIGIN=https://your.domain npm start  
 ```
 Set the portal URL in Playground **settings** → 🔗 Share then emits `<portal>/app/<id>`.
 
+### `server/src` - Hosted Gateway + webhooks
+The indexer is also the hosted Gateway. It polls Sui events into SQLite, then exposes cache
+responses with reverify anchors:
+
+```sh
+curl http://localhost:4318/verify?release=<release-id>
+curl http://localhost:4318/apps
+curl http://localhost:4318/agents
+curl http://localhost:4318/packages
+curl http://localhost:4318/bounties
+```
+
+Gateway responses use `{ "source": "indexer-cache", "data": ..., "reverify": ... }`.
+`reverify` includes network, package/object ids, Walrus blob ids, tree hashes, tx digest and
+event sequence where available.
+
+Webhook subscriptions are persistent and signed when a secret is provided:
+
+```sh
+curl -X POST http://localhost:4318/webhooks \
+  -H 'content-type: application/json' \
+  -d '{"eventType":"release.published","url":"https://example.com/signet","secret":"change-me"}'
+```
+
+Supported events: `release.published`, `bounty.claimed`, `bounty.paid`, `app.published`,
+`agent.reviewed`, or `*`. Payloads include `network`, `objectId`, `txDigest`, `eventSeq`,
+`walrus.blobIds`, and `reverify`; signed deliveries include `x-signet-signature`.
+
 Configure the URLs in Playground **settings**. To go live you provide the infra: host the
 services, fund the sponsor wallet (keep it modest/rotatable), register a Google OAuth client.
 
@@ -428,6 +462,7 @@ Beyond that the repo ships **self-running workflows** — all **testnet**; mainn
 | Workflow | Trigger | What it does | Needs (repo Secret) |
 |---|---|---|---|
 | `deploy-web.yml` | push to `web/**` | publish the SPA to Walrus Sites | `SUI_DEPLOY_KEY` (+ var `WALRUS_SITE_OBJECT`) |
+| `signet-release.yml` | manual / reusable | snapshot to Walrus, publish `release --pr`, verify, and emit GitHub Check outputs | `FORGE_OWNER_KEY` |
 | `agent-sweep.yml` | every 6h | CI agent reviews open PRs (where it holds a review cap) + re-verifies the latest release | `FORGE_CI_KEY` |
 | `renew.yml` | weekly | re-pin published apps' Walrus blobs so they don't expire (keyless) | — |
 | `seed.yml` | weekly | keep the testnet gallery non-empty | `FORGE_SEED_KEY` |
@@ -436,6 +471,7 @@ Beyond that the repo ships **self-running workflows** — all **testnet**; mainn
 Each active job **no-ops until its Secret is set** (Settings → Secrets and variables → Actions), so the
 repo stays green out of the box. Keys must be **testnet, funded, throwaway** — never a mainnet key.
 Manual one-offs: `forge renew --app <id>`, `npm run seed:gallery`, `bash scripts/deploy-walrus-site.sh`.
+GitHub release workflow contract and copy-paste YAML: [`.github/SIGNET-INTEGRATION.md`](.github/SIGNET-INTEGRATION.md).
 
 ---
 
@@ -482,11 +518,11 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Tech stack
 
-- **Contracts:** Sui Move (edition 2024), 7 modules, 53 tests; Seal access policy.
+- **Contracts:** Sui Move (edition 2024), 7 modules, 55 tests; Seal access policy.
 - **Storage:** Walrus (HTTP publisher/aggregator on testnet; `@mysten/walrus` SDK for owned blobs).
 - **App layer:** TypeScript — CLI (commander), `@mysten/sui` SDK, MCP server (stdio), CI worker,
   optional SQLite indexer.
-- **Web:** dependency-free static SPA — ES modules via esm.sh, `@mysten/sui@1.18.0`,
+- **Web:** dependency-free static SPA — ES modules via esm.sh, `@mysten/sui@1.30.0`,
   `@mysten/wallet-standard`, `@mysten/walrus`, `@mysten/sui/zklogin`. No bundler, no build step.
 - **Onboarding services:** Node 18+ (mostly dependency-free) — LLM proxy, sponsor, salt.
 - **LLM:** Anthropic (BYOK in-browser, or via the hosted proxy).
@@ -506,7 +542,7 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Project status
 
-- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps); 53/53 tests.
+- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps); 55/55 tests.
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (16 tools) + CLI (14 commands).

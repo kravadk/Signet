@@ -1,11 +1,10 @@
 /* ============================================================
-   Seal — owner-only client-side encryption for PRIVATE Playground apps.
+   Seal — client-side encryption for PRIVATE Playground apps.
 
    A private app's Walrus archive is encrypted in the browser with Mysten Seal
    under an identity NAMESPACED to the app's on-chain object id. Seal key servers
-   release decryption shares only when the on-chain policy `seal_approve_app_owner`
-   approves — and that policy aborts unless the requester is the app's builder. So
-   only the builder can ever decrypt, enforced on-chain (not by this client).
+   release decryption shares only when the on-chain policy approves. The v1 policy
+   allows the builder only; the v2 workspace policy also allows explicit members.
 
    Identity = the app's 32-byte object id. The Move policy `id_in_app` checks the
    decryption identity is prefixed by `object::id_bytes(app)`, so encrypting under
@@ -16,10 +15,10 @@
    The on-chain guarantee is live + tested; this is the client that rides on it.
    ============================================================ */
 import { CFG, sui, STATE } from './shared.js';
-import { Transaction } from 'https://esm.sh/@mysten/sui@1.18.0/transactions';
-import { fromHex } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
+import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
+import { fromHex } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 
-// Pinned to track the app's @mysten/sui@1.18; `external` shares that one copy so
+// Pinned to track the app's @mysten/sui@1.30; `external` shares that one copy so
 // Seal and the app agree on Transaction/types instead of bundling a second sui.
 const SEAL_SPECIFIER = 'https://esm.sh/@mysten/seal@0.4.5?external=@mysten/sui';
 
@@ -62,11 +61,10 @@ export async function sealEncrypt(bytes, appId) {
   return encryptedObject;
 }
 
-/** Decrypt a private app's archive. Only succeeds for the app's builder — the
-    on-chain `seal_approve_app_owner` policy gates the key release. Requires a
-    connected wallet that can sign a personal message (the Seal session key). */
+/** Decrypt a private app's archive. Only succeeds for the builder, or for an
+    allowlisted workspace member when CFG.workspaceRegistry is configured. */
 export async function sealDecrypt(encBytes, appId) {
-  if (!STATE.wallet) throw new Error('connect the builder wallet to decrypt');
+  if (!STATE.wallet) throw new Error('connect an authorized wallet to decrypt');
   const { SessionKey } = await seal();
   const c = await client();
   const address = STATE.wallet.address;
@@ -81,10 +79,19 @@ export async function sealDecrypt(encBytes, appId) {
 
   // 2) Approval transaction — the policy call the key servers evaluate.
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${CFG.playgroundPackageId}::playground::seal_approve_app_owner`,
-    arguments: [tx.pure.vector('u8', Array.from(fromHex(hex(appId)))), tx.object(appId)],
-  });
+  const idArg = tx.pure.vector('u8', Array.from(fromHex(hex(appId))));
+  const appArg = tx.object(appId);
+  if (CFG.workspaceRegistry) {
+    tx.moveCall({
+      target: `${CFG.playgroundPackageId}::playground::seal_approve_app_member`,
+      arguments: [idArg, appArg, tx.object(CFG.workspaceRegistry)],
+    });
+  } else {
+    tx.moveCall({
+      target: `${CFG.playgroundPackageId}::playground::seal_approve_app_owner`,
+      arguments: [idArg, appArg],
+    });
+  }
   const txBytes = await tx.build({ client: sui, onlyTransactionKind: true });
 
   // 3) Decrypt — key servers return shares only if the policy approves the sender.

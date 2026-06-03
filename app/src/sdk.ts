@@ -26,6 +26,7 @@ export {
   repoList,
   repoReadManifest,
   releaseRead,
+  releaseAttestation,
   issueList,
   bountyList,
   agentReputation,

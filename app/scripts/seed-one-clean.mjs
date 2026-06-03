@@ -114,7 +114,7 @@ const obj = await owner.client.getObject({ id: repoId, options: { showContent: t
 const src = obj.data?.content?.fields?.current_snapshot;
 const art = await storeBlobAuto(`build of ${name}`);
 const rep = await storeBlobAuto(`tests passed for ${name}`);
-const rel = await publishRelease(owner, { repoId, ownerCapId, version: 'v1.0.0', sourceSnapshot: src, buildArtifact: art.blobId, testReport: rep.blobId });
+const rel = await publishRelease(owner, { repoId, ownerCapId, version: 'v1.0.0', sourceSnapshot: src, buildArtifact: art.blobId, testReport: rep.blobId, mergedPrId: pr.prId });
 const releaseId = createdOfType(rel, '::release::Release')[0];
 console.log(`[clean] release v1.0.0 → ${releaseId}`);
 console.log(`\nVerify it:\n  FORGE_NETWORK=${NET} npm run forge -- verify --release ${releaseId}`);

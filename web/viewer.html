@@ -36,7 +36,7 @@
   <iframe id="frame" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer" style="display:none"></iframe>
 
   <script type="module">
-    import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.18.0/client';
+    import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.30.0/client';
 
     const params = new URLSearchParams(location.search);
     const appId = params.get('app');
@@ -119,8 +119,8 @@
         } catch {
           // A private app's archive is Seal-encrypted (not gzip) — the public viewer
           // can't decrypt it. Only the builder can, in the Playground (wallet-gated).
-          $('prov').textContent = '🔒 private · owner-only';
-          $('msg').innerHTML = '🔒 This app is private (Seal-encrypted).<br>Only its builder can open it — from the <a style="color:#4da2ff" href="./index.html#playground">Playground</a> with their wallet.';
+          $('prov').textContent = '🔒 private · wallet-gated';
+          $('msg').innerHTML = '🔒 This app is private (Seal-encrypted).<br>The builder or an allowlisted collaborator can open it from the <a style="color:#4da2ff" href="./index.html#playground">Playground</a> with their wallet.';
           return;
         }
         let html = inlineApp(files);

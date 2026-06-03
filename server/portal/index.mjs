@@ -148,7 +148,7 @@ async function renderAppPage(net, id) {
     html = inlineApp(files);
   } catch { /* expired / unavailable / encrypted */ }
   const status = verified ? '✓ verified · treeHash matches chain'
-    : encrypted ? '🔒 private · owner-only'
+    : encrypted ? '🔒 private · wallet-gated'
     : expired ? '⚠ bytes expired on Walrus' : '⚠ unverified';
   const bar =
     `<b>${esc(app.name)}</b>` +
@@ -158,35 +158,58 @@ async function renderAppPage(net, id) {
   const body = (expired || encrypted)
     ? `<div class="wrap"><div class="card"><h2>${esc(app.name)}</h2><p>${esc(app.prompt)}</p>` +
       (encrypted
-        ? `<p class="prov fail">🔒 This app is private — its bytes are Seal-encrypted on Walrus. Only the builder can decrypt and open it, from the Playground with their wallet. The on-chain record (provenance, hash, metrics) stays public and verifiable.</p>`
+        ? `<p class="prov fail">🔒 This app is private — its bytes are Seal-encrypted on Walrus. The builder or an allowlisted collaborator can decrypt and open it from the Playground with their wallet. The on-chain record (provenance, hash, metrics) stays public and verifiable.</p>`
         : `<p class="prov fail">The app's bytes have expired on Walrus. The on-chain record (provenance, hash, metrics) is permanent; the builder can re-pin to restore it.</p>`) +
       `<a class="btn" href="${esc(N.explorer(id))}" target="_blank" rel="noreferrer">View on-chain record ↗</a></div></div>`
     : `<iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="${esc(html)}"></iframe>`;
   return { code: 200, html: shell({ title: app.name, desc: app.prompt || `An app built on Signet · ${app.visits} visits · ${app.stars}★`, canonical: `${ORIGIN}/app/${id}${net === 'mainnet' ? '?net=mainnet' : ''}`, bar, bodyHtml: body }) };
 }
 
+async function queryPkgEvents(client, eventType, { limit, order, pageLimit = 50 }) {
+  const out = [];
+  let cursor = null;
+  do {
+    const page = await client.queryEvents({ query: { MoveEventType: eventType }, cursor, limit: pageLimit, order });
+    out.push(...page.data);
+    cursor = page.nextCursor;
+    if (!page.hasNextPage || out.length >= limit) break;
+  } while (cursor);
+  return out.slice(0, limit);
+}
+
+function eventTime(e) {
+  return Number(e.timestampMs || e.parsedJson?.created_at_ms || 0);
+}
+
 // Query an event struct across all historical playground packages (its type uses
-// the pkg that DEFINED it) and merge, dedup by tx+seq.
-async function pgEvents(net, structName, { limit = 200, order = 'descending' } = {}) {
+// the pkg that DEFINED it), cursor-paginate each package, then merge and dedup.
+async function pgEvents(net, structName, { limit = 500, order = 'descending' } = {}) {
   const N = NETS[net]; const seen = new Set(); const out = [];
+  const perPkgLimit = Math.max(limit, 50);
   const results = await Promise.all(N.eventPkgs.map((pkg) =>
-    N.client.queryEvents({ query: { MoveEventType: `${pkg}::playground::${structName}` }, limit, order }).then((r) => r.data, () => [])));
-  for (const data of results) for (const e of data) { const k = `${e.id?.txDigest}:${e.id?.eventSeq}`; if (!seen.has(k)) { seen.add(k); out.push(e); } }
-  return out;
+    queryPkgEvents(N.client, `${pkg}::playground::${structName}`, { limit: perPkgLimit, order }).catch(() => [])));
+  for (const data of results) {
+    for (const e of data) {
+      const k = `${e.id?.txDigest}:${e.id?.eventSeq}`;
+      if (!seen.has(k)) { seen.add(k); out.push(e); }
+    }
+  }
+  out.sort((a, b) => order === 'ascending' ? eventTime(a) - eventTime(b) : eventTime(b) - eventTime(a));
+  return out.slice(0, limit);
 }
 
 async function resolveHandle(net, handle) {
   const map = new Map();
   try {
-    for (const e of await pgEvents(net, 'NameClaimed', { limit: 500, order: 'ascending' })) { const j = e.parsedJson; if (j?.owner && j?.name) map.set(j.name, j.owner); }
-    for (const e of await pgEvents(net, 'NameReleased', { limit: 500, order: 'ascending' })) { const j = e.parsedJson; if (j?.name && map.get(j.name) === j.owner) map.delete(j.name); }
+    for (const e of await pgEvents(net, 'NameClaimed', { limit: 2000, order: 'ascending' })) { const j = e.parsedJson; if (j?.owner && j?.name) map.set(j.name, j.owner); }
+    for (const e of await pgEvents(net, 'NameReleased', { limit: 2000, order: 'ascending' })) { const j = e.parsedJson; if (j?.name && map.get(j.name) === j.owner) map.delete(j.name); }
   } catch {}
   return map.get(handle) || null;
 }
 
 async function listApps(net, limit = 60) {
   const N = NETS[net];
-  const ids = (await pgEvents(net, 'AppPublished', { limit: Math.min(limit, 200), order: 'descending' })).map((e) => e.parsedJson?.app_id).filter(Boolean);
+  const ids = (await pgEvents(net, 'AppPublished', { limit: Math.min(Math.max(limit, 1), 1000), order: 'descending' })).map((e) => e.parsedJson?.app_id).filter(Boolean);
   const out = [];
   for (let i = 0; i < ids.length; i += 50) {
     const objs = await N.client.multiGetObjects({ ids: ids.slice(i, i + 50), options: { showContent: true } });

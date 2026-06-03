@@ -69,6 +69,7 @@ export interface Release {
   buildArtifact: string;
   testReport: string;
   publishedBy: string;
+  mergedPrId?: string | null;
 }
 
 function fields(obj: any): any {
@@ -130,6 +131,7 @@ export async function getRelease(id: string): Promise<Release | null> {
   const obj = await client.getObject({ id, options: { showContent: true } });
   const f = fields(obj);
   if (!f.version) return null;
+  const links = await releaseLinksMap();
   return {
     id,
     repoId: f.repo_id,
@@ -138,6 +140,7 @@ export async function getRelease(id: string): Promise<Release | null> {
     buildArtifact: f.build_artifact,
     testReport: f.test_report,
     publishedBy: f.published_by,
+    mergedPrId: links.get(id) ?? null,
   };
 }
 
@@ -148,8 +151,25 @@ export async function listReleases(repoId: string, limit = 50): Promise<Release[
     .filter((e) => (e.parsedJson as any)?.repo_id === repoId)
     .map((e) => (e.parsedJson as any)?.release_id)
     .filter(Boolean) as string[];
-  const releases = await Promise.all(ids.map((id) => getRelease(id).catch(() => null)));
+  const links = await releaseLinksMap();
+  const releases = await Promise.all(ids.map(async (id) => {
+    const r = await getRelease(id).catch(() => null);
+    if (r) r.mergedPrId = links.get(id) ?? null;
+    return r;
+  }));
   return releases.filter((r): r is Release => r !== null);
+}
+
+async function releaseLinksMap(): Promise<Map<string, string>> {
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::release::ReleaseLinked` }, { max: 2000 });
+  const links = new Map<string, string>();
+  for (const e of data) {
+    const p = e.parsedJson as any;
+    if (p?.release_id && p?.merged_pr_id && !links.has(p.release_id)) {
+      links.set(p.release_id, p.merged_pr_id);
+    }
+  }
+  return links;
 }
 
 /**

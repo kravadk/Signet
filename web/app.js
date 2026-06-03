@@ -20,7 +20,7 @@ import {
   actVouch, actSetApprovals,
 } from './wallet.js';
 import { wirePlayground, renderPlaygroundView, loadGallery } from './playground.js';
-import { completeZkLoginFromRedirect, restoreZkLogin } from './zklogin.js';
+import { beginZkLogin, completeZkLoginFromRedirect, restoreZkLogin, zkConfigured } from './zklogin.js';
 
 /* ============================================================
    On-chain reads (event-scan + getObject), mirror of forge.ts
@@ -92,7 +92,10 @@ async function getPullRequest(id) {
 async function listAllPullRequests() {
   const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::pull_request::PrOpened` });
   const ids = data.map((e) => e.parsedJson?.pr_id).filter(Boolean);
-  return multiGet(ids, parsePr);
+  const meta = new Map(data.map((e) => [e.parsedJson?.pr_id, { tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0) }]).filter(([id]) => id));
+  const prs = await multiGet(ids, parsePr);
+  for (const p of prs) Object.assign(p, meta.get(p.id) || {});
+  return prs;
 }
 
 function parseRelease(x, id) {
@@ -100,6 +103,7 @@ function parseRelease(x, id) {
   return {
     id, repoId: x.repo_id, version: x.version, sourceSnapshot: x.source_snapshot,
     buildArtifact: x.build_artifact, testReport: x.test_report, publishedBy: x.published_by,
+    mergedPrId: null,
   };
 }
 async function getRelease(id) {
@@ -110,7 +114,19 @@ async function getRelease(id) {
 async function listAllReleases() {
   const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::release::ReleasePublished` });
   const ids = data.map((e) => e.parsedJson?.release_id).filter(Boolean);
-  return multiGet(ids, parseRelease);
+  const [releases, links] = await Promise.all([multiGet(ids, parseRelease), releaseLinksMap()]);
+  for (const r of releases) r.mergedPrId = links.get(r.id) || null;
+  return releases;
+}
+
+async function releaseLinksMap() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::release::ReleaseLinked` }, { max: 2000 });
+  const links = new Map();
+  for (const e of data) {
+    const p = e.parsedJson;
+    if (p?.release_id && p?.merged_pr_id && !links.has(p.release_id)) links.set(p.release_id, p.merged_pr_id);
+  }
+  return links;
 }
 
 async function listAllReputation() {
@@ -167,10 +183,12 @@ async function listAllIssues() {
 function parseBounty(x, id) {
   if (x.amount === undefined) return null;
   const claimant = x.claimant?.fields?.vec?.[0] ?? (typeof x.claimant === 'string' ? x.claimant : null);
+  const proof = x.proof?.fields?.vec?.[0] ?? (typeof x.proof === 'string' ? x.proof : null);
   return {
     id, repoId: x.repo_id, funder: x.funder, title: x.title,
     amount: Number(x.amount), status: Number(x.status),
     claimant: typeof claimant === 'string' ? claimant : null,
+    proof: typeof proof === 'string' ? proof : null,
     minScore: Number(x.min_score ?? 0),
   };
 }
@@ -182,7 +200,40 @@ async function getBounty(id) {
 async function listAllBounties() {
   const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::bounty::BountyPosted` });
   const ids = data.map((e) => e.parsedJson?.bounty_id).filter(Boolean);
-  return multiGet(ids, parseBounty);
+  const meta = new Map(data.map((e) => [e.parsedJson?.bounty_id, { tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0) }]).filter(([id]) => id));
+  const bounties = await multiGet(ids, parseBounty);
+  for (const b of bounties) Object.assign(b, meta.get(b.id) || {});
+  return bounties;
+}
+
+async function listReviewEvents() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::pull_request::ReviewSubmitted` }, { max: 2000 });
+  return data.map((e) => {
+    const p = e.parsedJson || {};
+    return {
+      reviewId: p.review_id, prId: p.pr_id, reviewer: p.reviewer,
+      verdict: Number(p.verdict ?? 0), reportBlob: p.report_blob,
+      tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0),
+    };
+  }).filter((x) => x.reviewId && x.reviewer);
+}
+
+async function listVouchEvents() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.packageId}::reputation::AgentVouched` }, { max: 2000 });
+  return data.map((e) => {
+    const p = e.parsedJson || {};
+    return { repoId: p.repo_id, voucher: p.voucher, subject: p.subject, tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0) };
+  }).filter((x) => x.subject && x.voucher);
+}
+
+async function listBountyLifecycleEvents() {
+  const [claimed, submitted, paid] = await Promise.all([
+    queryAllEvents({ MoveEventType: `${CFG.packageId}::bounty::BountyClaimed` }, { max: 2000 }),
+    queryAllEvents({ MoveEventType: `${CFG.packageId}::bounty::BountySubmitted` }, { max: 2000 }),
+    queryAllEvents({ MoveEventType: `${CFG.packageId}::bounty::BountyPaid` }, { max: 2000 }),
+  ]);
+  const mapEvent = (e) => ({ ...(e.parsedJson || {}), tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0) });
+  return { claimed: claimed.map(mapEvent), submitted: submitted.map(mapEvent), paid: paid.map(mapEvent) };
 }
 
 /* ---------- Walrus: manifest + archive (file tree) ---------- */
@@ -287,6 +338,18 @@ async function verifyReleaseBrowser(releaseId) {
 
   // merged PR whose head == release source
   let chainOk = false, reviewedOk = false, chainDetail = 'no merged PR matched the release source';
+  if (rel.mergedPrId) {
+    const pr = STATE.prs.find((p) => p.id === rel.mergedPrId);
+    if (pr) {
+      chainOk = pr.repoId === rel.repoId && pr.status === 1 && pr.headSnapshot === rel.sourceSnapshot;
+      reviewedOk = (pr.reviewRefs?.length || 0) > 0;
+      chainDetail = `ReleaseLinked PR ${short(rel.mergedPrId)}` + (chainOk ? ' head == release source' : ' does not match release source') +
+        (reviewedOk ? ` signed reviews: ${pr.reviewRefs.length}` : ' no review');
+    } else {
+      chainDetail = `ReleaseLinked PR ${short(rel.mergedPrId)} not loaded`;
+    }
+  }
+  if (!chainOk) {
   const mergedPrs = STATE.prs.filter((p) => p.repoId === rel.repoId && p.status === 1);
   for (const pr of mergedPrs) {
     if (pr.headSnapshot === rel.sourceSnapshot) {
@@ -295,6 +358,7 @@ async function verifyReleaseBrowser(releaseId) {
       chainDetail = `PR ${short(pr.id)} head == release source` + (reviewedOk ? ` · ${pr.reviewRefs.length} signed review(s)` : ' · no review');
       break;
     }
+  }
   }
   steps.push({ label: 'Signed review in the chain', ok: reviewedOk, detail: reviewedOk ? chainDetail : 'no signed review found' });
   steps.push({ label: 'Reviewed code == released code', ok: chainOk, detail: chainDetail });
@@ -309,14 +373,77 @@ async function verifyReleaseBrowser(releaseId) {
   return { releaseId: rel.id, version: rel.version, pass, level, levelLabel, steps };
 }
 
+async function releaseAttestationBrowser(releaseId) {
+  const rel = STATE.releases.find((x) => x.id === releaseId);
+  if (!rel) throw new Error('release not loaded');
+  const [verify, manifest] = await Promise.all([verifyReleaseBrowser(releaseId), fetchManifest(rel.sourceSnapshot)]);
+  const repo = STATE.repos.find((r) => r.id === rel.repoId);
+  return {
+    _type: 'https://in-toto.io/Statement/v1',
+    subject: [{
+      name: `${repo?.name || rel.repoId}@${rel.version}`,
+      digest: { treeHash: manifest?.treeHash || rel.sourceSnapshot },
+    }],
+    predicateType: 'https://slsa.dev/provenance/v1',
+    predicate: {
+      buildDefinition: {
+        buildType: 'https://signet.dev/release/v2',
+        externalParameters: {
+          network: CFG.network,
+          packageId: CFG.packageId,
+          repoId: rel.repoId,
+          releaseId: rel.id,
+          mergedPrId: rel.mergedPrId,
+          version: rel.version,
+        },
+        resolvedDependencies: [
+          { uri: `sui:package:${CFG.packageId}`, digest: { suiObjectId: CFG.packageId } },
+          { uri: `walrus:blob:${rel.sourceSnapshot}`, digest: { treeHash: manifest?.treeHash || '' } },
+          { uri: `walrus:blob:${rel.buildArtifact}` },
+          { uri: `walrus:blob:${rel.testReport}` },
+        ],
+      },
+      runDetails: {
+        builder: { id: 'signet-forge' },
+        metadata: { invocationId: rel.id, verificationLevel: verify.levelLabel, verified: verify.pass },
+      },
+    },
+  };
+}
+
+function downloadJson(name, value) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+
 /** Render a verify result into a host element. */
 function renderVerifyResult(host, result) {
   const badge = result.pass
     ? `<span class="vbadge pass">✓ ${escapeHtml(result.levelLabel)} · Verified provenance</span>`
     : `<span class="vbadge fail">✗ Unverified</span>`;
+  const r = STATE.releases.find((x) => x.id === result.releaseId) || {};
+  const linkedPr = r.mergedPrId ? STATE.prs.find((p) => p.id === r.mergedPrId) : null;
+  const releaseGraph = r.mergedPrId
+    ? '<h3 class="detail-h3">Release graph</h3>' +
+      '<div class="prov-chain">' +
+        '<div class="prov-node g"><div class="prov-label">Repo</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.repoId) + '">' + short(r.repoId) + '</a></div>' +
+        '<span class="prov-arrow">в†’</span>' +
+        '<div class="prov-node b"><div class="prov-label">Merged PR</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.mergedPrId) + '">' + short(r.mergedPrId) + '</a></div>' +
+        '<span class="prov-arrow">в†’</span>' +
+        '<div class="prov-node v"><div class="prov-label">Reviews / CI</div><span class="prov-blob mono">' + (linkedPr ? ((linkedPr.reviewRefs?.length || 0) + ' report(s)') : 'not loaded') + '</span></div>' +
+        '<span class="prov-arrow">в†’</span>' +
+        '<div class="prov-node release"><div class="prov-label">Release</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.id) + '">' + short(r.id) + '</a></div>' +
+      '</div>'
+    : '<div class="cmd-note" style="margin:8px 0 14px">Legacy release: no direct PR link; verification falls back to matching merged PR head snapshots.</div>';
   host.innerHTML =
     '<div class="verify-result">' +
       '<div class="verify-top">' + badge + '</div>' +
+      releaseGraph +
       '<div class="verify-steps">' +
         result.steps.map((s) =>
           '<div class="vstep ' + (s.ok ? 'ok' : 'bad') + '">' +
@@ -369,6 +496,7 @@ const fullFmt = new Intl.DateTimeFormat('en', { month: 'long', day: 'numeric', y
 
 let chartData = []; // [{ key, label, full, v }]
 let chartModule = 'all'; // active Activity-Overview filter (real, drives the chart)
+const agentFilters = { q: '', scope: 'all', minScore: 0, reliability: 'all', recent: 'all' };
 
 // Build per-day buckets from the live feed, optionally filtered to one module.
 function bucketsForModule(mod) {
@@ -536,6 +664,43 @@ function renderReputation(reps) {
   ).join('');
 }
 
+function sponsorDashboardUrl() {
+  const u = SETTINGS.sponsorUrl || '';
+  if (!u) return '';
+  return u.endsWith('/sponsor') ? u.slice(0, -'/sponsor'.length) + '/dashboard' : u.replace(/\/$/, '') + '/dashboard';
+}
+
+async function renderSponsorDashboard() {
+  const el = $('sponsorDash');
+  if (!el) return;
+  const url = sponsorDashboardUrl();
+  if (!url) {
+    el.innerHTML = '<div class="empty-state">Sponsor not configured.</div>';
+    return;
+  }
+  el.innerHTML = '<div class="empty-state">Loading sponsor status...</div>';
+  try {
+    const d = await withTimeout(fetch(url).then((r) => {
+      if (!r.ok) throw new Error('sponsor ' + r.status);
+      return r.json();
+    }), 6000, 'sponsor dashboard');
+    const pct = d.dailyBudgetMist ? Math.round((Number(d.spendEstimatedMist || 0) / Number(d.dailyBudgetMist)) * 100) : 0;
+    el.innerHTML =
+      '<div class="rep-item">' +
+        '<div class="rep-meta" style="width:100%">' +
+          '<div class="buy-row"><span class="k">Status :</span><span class="pill ' + (d.ok ? 'released' : 'closed') + '">' + (d.ok ? 'ready' : 'not ready') + '</span></div>' +
+          '<div class="buy-row"><span class="k">Balance :</span><span class="v mono">' + suiAmount(Number(d.balanceMist || 0)) + ' SUI</span></div>' +
+          '<div class="buy-row"><span class="k">Spend today :</span><span class="v mono">' + suiAmount(Number(d.spendEstimatedMist || 0)) + ' / ' + suiAmount(Number(d.dailyBudgetMist || 0)) + ' SUI (' + pct + '%)</span></div>' +
+          '<div class="buy-row"><span class="k">Rejected :</span><span class="v mono">' + Number(d.rejected || 0) + '</span></div>' +
+          '<div class="buy-row"><span class="k">Rate-limit hits :</span><span class="v mono">' + Number(d.rateLimitHits || 0) + '</span></div>' +
+          '<div class="buy-row"><span class="k">Write mode :</span><span class="v mono">' + escapeHtml(d.quotas?.writeMode || 'open') + '</span></div>' +
+        '</div>' +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="empty-state">Sponsor dashboard unavailable: ' + escapeHtml(e.message || e) + '</div>';
+  }
+}
+
 
 function setStat(id, value) {
   const el = $(id);
@@ -585,7 +750,7 @@ async function loadData() {
     $('pkgShort').textContent = CFG.network + ' — not deployed';
     const msg = '<div class="empty-state">Signet is not yet deployed on <b>' + CFG.network +
       '</b>. Switch to testnet (remove ?network=mainnet) or publish the package and fill its address.</div>';
-    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'issuesList', 'bountiesList', 'activityFeed', 'buyList', 'repList'].forEach((id) => { const el = $(id); if (el) el.innerHTML = msg; });
+    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'packageTrust', 'issuesList', 'bountiesList', 'activityFeed', 'buyList', 'repList'].forEach((id) => { const el = $(id); if (el) el.innerHTML = msg; });
     ['statRepos', 'statPrs', 'statReleases', 'ovTotal'].forEach((id) => { const el = $(id); if (el) el.textContent = '—'; });
     return;
   }
@@ -635,13 +800,14 @@ async function loadData() {
     setSkel('activityFeed', skeletonList(5));
     setSkel('buyList', skeletonList(3));
     setSkel('repList', skeletonList(3));
+    setSkel('sponsorDash', skeletonList(1));
     setSkel('delBody', skeletonRows(4));
   }
 
   try {
     // withTimeout turns a hung fullnode into the same empty-state fallback as a
     // rejection, so a slow RPC can never leave a view spinning forever.
-    const [repos, prs, releases, reps, issues, bounties, activity, agentCaps] = await Promise.all([
+    const [repos, prs, releases, reps, issues, bounties, activity, agentCaps, reviewEvents, vouchEvents, bountyEvents] = await Promise.all([
       withTimeout(listRepos(), 15000, 'repos').catch(() => []),
       withTimeout(listAllPullRequests(), 15000, 'prs').catch(() => []),
       withTimeout(listAllReleases(), 15000, 'releases').catch(() => []),
@@ -650,6 +816,9 @@ async function loadData() {
       withTimeout(listAllBounties(), 15000, 'bounties').catch(() => []),
       withTimeout(listActivity(), 15000, 'activity').catch(() => ({ perMod: {}, total: 0, tsBuckets: new Map(), feed: [] })),
       withTimeout(listAgentCaps(), 15000, 'caps').catch(() => new Map()),
+      withTimeout(listReviewEvents(), 15000, 'reviews').catch(() => []),
+      withTimeout(listVouchEvents(), 15000, 'vouches').catch(() => []),
+      withTimeout(listBountyLifecycleEvents(), 15000, 'bounty lifecycle').catch(() => ({ claimed: [], submitted: [], paid: [] })),
     ]);
 
     // owner from first repo (owner card may be absent — guard each element)
@@ -681,6 +850,7 @@ async function loadData() {
     const repoNameById = new Map(repos.map((r) => [r.id, r.name]));
     renderReleases(releases, repoNameById);
     renderReputation(reps);
+    renderSponsorDashboard();
 
     // chart — respects the active Activity-Overview module filter
     renderChart();
@@ -703,11 +873,15 @@ async function loadData() {
     STATE.activity = activity;
     STATE.repoNameById = repoNameById;
     STATE.agentCaps = agentCaps;
+    STATE.reviewEvents = reviewEvents;
+    STATE.vouchEvents = vouchEvents;
+    STATE.bountyEvents = bountyEvents;
     STATE.loaded = true;
     renderReposView();
     renderPRsView('all');
     renderReleasesView();
     renderAgentsView();
+    renderPackagesView();
     renderIssuesView();
     renderBountiesView();
     renderActivityView();
@@ -821,6 +995,7 @@ function wireUI() {
     const id = $('verifySelect').value;
     runVerify(id, $('verifyOut'), vBtn);
   });
+  wireAgentFilters();
 
   // overview dropdown
   const ovDropdown = $('ovDropdown');
@@ -848,13 +1023,32 @@ function wireUI() {
   });
 }
 
+function wireAgentFilters() {
+  const search = $('agentSearch');
+  if (!search || search.dataset.wired) return;
+  search.dataset.wired = '1';
+  const sync = () => {
+    agentFilters.q = search.value || '';
+    agentFilters.scope = $('agentScope')?.value || 'all';
+    agentFilters.minScore = Number($('agentScore')?.value || 0);
+    agentFilters.reliability = $('agentReliability')?.value || 'all';
+    agentFilters.recent = $('agentRecent')?.value || 'all';
+    if (STATE.loaded) renderAgentsView();
+  };
+  search.addEventListener('input', sync);
+  ['agentScope', 'agentScore', 'agentReliability', 'agentRecent'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('change', sync);
+  });
+}
+
 /* ============================================================
    View routing (single-page; swaps #view-* sections)
    ============================================================ */
 
 const VIEW_TITLES = {
   dashboard: 'Dashboard', playground: 'Playground', repos: 'Repositories', prs: 'Pull Requests',
-  releases: 'Releases', agents: 'Agents', issues: 'Issues', bounties: 'Bounties',
+  releases: 'Releases', packages: 'Packages', agents: 'Agents', issues: 'Issues', bounties: 'Bounties',
   activity: 'Activity', verify: 'Verify', trust: 'Trust Model',
   walrus: 'Walrus Storage', mcp: 'MCP / Agents API', detail: 'Detail',
 };
@@ -960,12 +1154,62 @@ function renderReleasesView() {
 }
 
 /* ---------- Agents view (reputation, expanded) ---------- */
+function capMatchesScope(cap, scope) {
+  if (scope === 'all') return true;
+  if (!cap) return false;
+  if (scope === 'active') return !cap.revoked;
+  const bits = { open_pr: SCOPE_OPEN_PR, review: SCOPE_REVIEW, run_ci: SCOPE_RUN_CI };
+  return (cap.scopes & bits[scope]) === bits[scope];
+}
+
+function agentSummary(addr) {
+  const prs = STATE.prs.filter((p) => p.author === addr);
+  const reviews = STATE.reviewEvents.filter((r) => r.reviewer === addr);
+  const vouches = STATE.vouchEvents.filter((v) => v.subject === addr);
+  const claimed = STATE.bountyEvents.claimed.filter((e) => e.claimant === addr);
+  const paid = STATE.bountyEvents.paid.filter((e) => e.claimant === addr);
+  const bounties = STATE.bounties.filter((b) => b.claimant === addr || claimed.some((e) => e.bounty_id === b.id));
+  const opened = prs.length;
+  const merged = prs.filter((p) => p.status === 1).length;
+  const totalWork = opened + reviews.length + claimed.length;
+  const completed = merged + reviews.length + paid.length;
+  const reliability = totalWork ? completed / totalWork : 0;
+  const recentTs = Math.max(0, ...prs.map((p) => p.ts || 0), ...reviews.map((r) => r.ts || 0), ...claimed.map((e) => e.ts || 0), ...paid.map((e) => e.ts || 0), ...vouches.map((e) => e.ts || 0));
+  const repoIds = new Set([...prs.map((p) => p.repoId), ...reviews.map((r) => STATE.prs.find((p) => p.id === r.prId)?.repoId), ...bounties.map((b) => b.repoId)].filter(Boolean));
+  return { prs, reviews, vouches, claimed, paid, bounties, opened, merged, totalWork, completed, reliability, recentTs, repoIds };
+}
+
+function filteredAgents() {
+  const q = agentFilters.q.trim().toLowerCase();
+  const minScore = Number(agentFilters.minScore || 0);
+  const minRel = agentFilters.reliability === 'all' ? 0 : Number(agentFilters.reliability);
+  return STATE.reps
+    .map((r) => ({ rep: r, cap: STATE.agentCaps.get(r.agent), summary: agentSummary(r.agent) }))
+    .filter(({ rep, cap, summary }) => {
+      if (q && !rep.agent.toLowerCase().includes(q) && !String(nameOrShort(rep.agent)).toLowerCase().includes(q)) return false;
+      if (rep.score < minScore) return false;
+      if (!capMatchesScope(cap, agentFilters.scope)) return false;
+      if (minRel && summary.reliability < minRel) return false;
+      if (agentFilters.recent === 'active' && !rep.lastEpoch) return false;
+      if (agentFilters.recent === 'cap' && !cap) return false;
+      return true;
+    })
+    .sort((a, b) => b.rep.score - a.rep.score || b.summary.recentTs - a.summary.recentTs);
+}
+
 function renderAgentsView() {
   const el = $('agentsGrid');
   if (!el) return;
   if (!STATE.reps.length) { el.innerHTML = '<div class="empty-state">No agent activity recorded yet.</div>'; return; }
-  el.innerHTML = STATE.reps.map((r) => {
-    const cap = STATE.agentCaps.get(r.agent);
+  const rows = filteredAgents();
+  const summaryEl = $('agentMarketSummary');
+  if (summaryEl) {
+    const activeCaps = rows.filter((x) => x.cap && !x.cap.revoked).length;
+    const avgReliability = rows.length ? Math.round(rows.reduce((n, x) => n + x.summary.reliability, 0) / rows.length * 100) : 0;
+    summaryEl.textContent = `${rows.length} agent(s) · ${activeCaps} active cap(s) · avg reliability ${avgReliability}%`;
+  }
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No agents match the selected filters.</div>'; return; }
+  el.innerHTML = rows.map(({ rep: r, cap, summary }) => {
     let delegation;
     if (cap) {
       const chips = scopeChips(cap.scopes).map((s) => '<span class="scope-chip">' + s + '</span>').join('');
@@ -986,10 +1230,12 @@ function renderAgentsView() {
     const vouchBtn = canVouch
       ? '<button class="cmd-action vouch-btn" data-vouch="' + r.agent + '" style="margin-left:auto">Vouch</button>'
       : '';
+    const relPct = Math.round(summary.reliability * 100);
+    const last = summary.recentTs ? relativeTime(summary.recentTs) : (r.lastEpoch ? 'epoch ' + r.lastEpoch : 'no recent event');
     return '<div class="agent-card">' +
       '<div class="agent-card-head">' +
         '<div class="rep-av" style="width:48px;height:48px;font-size:14px">' + (r.agent ? r.agent.slice(2, 4).toUpperCase() : '··') + '</div>' +
-        '<a class="rep-addr link" target="_blank" rel="noreferrer" href="' + explorerAddress(r.agent) + '">' + escapeHtml(nameOrShort(r.agent)) + '</a>' +
+        '<button class="agent-link" data-agent="' + r.agent + '">' + escapeHtml(nameOrShort(r.agent)) + '</button>' +
         (STATE.wallet?.address === r.agent ? '<span class="you-tag">you</span>' : '') +
         '<span class="tier-badge ' + scoreTier(r.score).cls + '" data-tip="Trust tier derived from on-chain score" style="margin-left:auto">' + scoreTier(r.score).tier + '</span>' +
         '<span class="score-badge" data-tip="Aggregate trust score (merged·10 + reviews·3 + CI·2 + vouches·5)">' + r.score + '</span>' +
@@ -1000,9 +1246,16 @@ function renderAgentsView() {
         '<div class="agent-stat"><div class="as-num">' + r.ciRuns + '</div><div class="as-lbl">CI runs</div></div>' +
         '<div class="agent-stat"><div class="as-num">' + r.vouches + '</div><div class="as-lbl">vouches</div></div>' +
       '</div>' +
+      '<div class="agent-market-row">' +
+        '<span class="market-pill">scope ' + escapeHtml(cap ? scopeChips(cap.scopes).join(', ') || 'none' : 'none') + '</span>' +
+        '<span class="market-pill">reliability ' + relPct + '%</span>' +
+        '<span class="market-pill">repos ' + summary.repoIds.size + '</span>' +
+        '<span class="market-pill">last ' + escapeHtml(last) + '</span>' +
+      '</div>' +
       delegation +
       '<div class="agent-foot">' +
-        '<button class="cmd-action prove-btn" data-prove="' + r.agent + '">Prove work</button>' +
+        '<button class="cmd-action profile-btn" data-profile="' + r.agent + '">Profile</button>' +
+        '<button class="cmd-action prove-btn" data-prove="' + r.agent + '">Memory vault</button>' +
         vouchBtn +
       '</div>' +
       '<div class="agent-note">Reputation is a side effect of real signed on-chain actions — not self-reported.</div>' +
@@ -1012,54 +1265,167 @@ function renderAgentsView() {
     b.addEventListener('click', () => actVouch(STATE.repos[0].id, b.dataset.vouch)));
   el.querySelectorAll('.prove-btn').forEach((b) =>
     b.addEventListener('click', () => proveAgentWork(b.dataset.prove)));
+  el.querySelectorAll('.profile-btn,.agent-link').forEach((b) =>
+    b.addEventListener('click', () => showAgentDetail(b.dataset.profile || b.dataset.agent)));
 }
 
-/** "Prove work": collect an agent's PRs + reviews, fetch their Walrus blobs, and
- *  show tamper-proof recall — the agent can cryptographically demonstrate what it
- *  did. Verifiable memory in action. */
+async function memoryVaultItems(addr) {
+  const s = agentSummary(addr);
+  const items = [];
+  for (const p of s.prs) {
+    items.push({ kind: 'PR source', title: p.title, blob: p.headSnapshot, objectId: p.id, tx: p.tx, repoId: p.repoId });
+    if (p.diffManifest) items.push({ kind: 'PR diff', title: p.title, blob: p.diffManifest, objectId: p.id, tx: p.tx, repoId: p.repoId });
+    const linked = STATE.releases.find((r) => r.mergedPrId === p.id || r.sourceSnapshot === p.headSnapshot);
+    if (linked) items.push({ kind: 'Release proof', title: linked.version, objectId: linked.id, blob: linked.sourceSnapshot, repoId: linked.repoId });
+  }
+  for (const r of s.reviews) {
+    const pr = STATE.prs.find((p) => p.id === r.prId);
+    items.push({ kind: r.verdict === 1 ? 'Review approve' : 'Review report', title: pr?.title || ('verdict ' + r.verdict), blob: r.reportBlob, objectId: r.reviewId, tx: r.tx, repoId: pr?.repoId });
+  }
+  for (const b of s.bounties) {
+    if (b.proof) items.push({ kind: 'Bounty proof', title: b.title, proof: b.proof, objectId: b.id, tx: b.tx, repoId: b.repoId });
+    else items.push({ kind: 'Bounty claim', title: b.title, objectId: b.id, tx: b.tx, repoId: b.repoId });
+  }
+  for (const v of s.vouches) items.push({ kind: 'Vouch', title: 'vouched by ' + short(v.voucher), objectId: v.repoId, tx: v.tx, repoId: v.repoId });
+  for (const item of items) {
+    if (item.blob) item.ok = await blobAvailableBrowser(item.blob);
+    else if (item.proof && !isValidSuiObjectId(item.proof)) item.ok = await blobAvailableBrowser(item.proof);
+    else item.ok = true;
+  }
+  return items;
+}
+
+function itemLink(i) {
+  if (i.blob) return { href: blobUrl(i.blob), label: short(i.blob) + ' ->' };
+  if (i.proof && isValidSuiObjectId(i.proof)) return { href: explorerObject(i.proof), label: short(i.proof) + ' ->' };
+  if (i.proof) return { href: blobUrl(i.proof), label: short(i.proof) + ' ->' };
+  if (i.objectId && isValidSuiObjectId(i.objectId)) return { href: explorerObject(i.objectId), label: short(i.objectId) + ' ->' };
+  if (i.tx) return { href: explorerTx(i.tx), label: short(i.tx) + ' ->' };
+  return null;
+}
+
+/** "Memory vault": collect an agent's PRs, reviews, CI reports, proofs and
+ *  vouches, then re-check Walrus availability for every blob-backed record. */
 async function proveAgentWork(addr) {
   openModal({
-    title: 'Prove work · ' + short(addr),
+    title: 'Memory vault · ' + short(addr),
     wide: true,
-    bodyHtml: '<div class="empty-state">Reconstructing tamper-proof memory from Walrus…</div>',
+    bodyHtml: '<div class="empty-state">Reconstructing memory records from Sui events and Walrus blobs...</div>',
     onMount: async (body) => {
-      const myPrs = STATE.prs.filter((p) => p.author === addr);
-      const items = [];
-      // PR head snapshots (proposed code)
-      for (const p of myPrs) {
-        const ok = await blobAvailableBrowser(p.headSnapshot);
-        items.push({ kind: 'PR', title: p.title, blob: p.headSnapshot, ok, id: p.id });
-      }
-      // review reports authored by this agent (scan ReviewSubmitted)
-      try {
-        const ev = await sui.queryEvents({ query: { MoveEventType: `${CFG.packageId}::pull_request::ReviewSubmitted` }, limit: 100, order: 'descending' });
-        for (const e of ev.data) {
-          const j = e.parsedJson;
-          if (j?.reviewer !== addr) continue;
-          const ok = await blobAvailableBrowser(j.report_blob);
-          items.push({ kind: 'Review', title: 'verdict ' + j.verdict, blob: j.report_blob, ok, id: e.id.txDigest });
-        }
-      } catch {}
+      const items = await memoryVaultItems(addr);
       if (!items.length) {
-        body.innerHTML = '<div class="empty-state">No on-chain work found for this agent in the scan window.</div>';
+        body.innerHTML = '<div class="empty-state">No on-chain work found for this agent.</div>';
         return;
       }
       const allOk = items.every((i) => i.ok);
       body.innerHTML =
         '<p class="cmd-note" style="margin-bottom:14px">Each item below is an on-chain action whose payload lives on Walrus. ' +
-        'A green check means the content is still byte-for-byte retrievable and content-addressed — the agent’s memory of this work is tamper-proof.</p>' +
+        'A green check means the content is still retrievable or the proof is an on-chain object anchor.</p>' +
         '<div class="verify-steps">' + items.map((i) =>
+          { const link = itemLink(i); return (
           '<div class="vstep ' + (i.ok ? 'ok' : 'bad') + '">' +
             '<span class="vmark">' + (i.ok ? '✓' : '✗') + '</span>' +
-            '<span class="vlabel">' + i.kind + ' · ' + escapeHtml(i.title || short(i.id)) + '</span>' +
-            '<a class="vdetail mono link" target="_blank" rel="noreferrer" href="' + blobUrl(i.blob) + '">' + short(i.blob) + ' ↗</a>' +
-          '</div>').join('') +
+            '<span class="vlabel">' + escapeHtml(i.kind) + ' · ' + escapeHtml(i.title || short(i.objectId || i.tx)) + '</span>' +
+            (link ? '<a class="vdetail mono link" target="_blank" rel="noreferrer" href="' + link.href + '">' + escapeHtml(link.label) + '</a>' : '<span class="vdetail mono">anchored</span>') +
+          '</div>'); }).join('') +
         '</div>' +
         '<div class="verify-top" style="margin-top:14px">' +
-          (allOk ? '<span class="vbadge pass">✓ ' + items.length + ' actions · memory verified on Walrus</span>'
+          (allOk ? '<span class="vbadge pass">✓ ' + items.length + ' records · memory verified</span>'
                  : '<span class="vbadge fail">✗ some payloads unavailable</span>') +
         '</div>';
     },
+  });
+}
+
+function showAgentDetail(addr) {
+  backTo = 'agents';
+  const r = STATE.reps.find((x) => x.agent === addr);
+  if (!r) return;
+  const cap = STATE.agentCaps.get(addr);
+  const s = agentSummary(addr);
+  const host = $('detailBody');
+  showView('detail');
+  $('detailTitle').textContent = 'Agent ' + short(addr);
+  const tier = scoreTier(r.score);
+  const capHtml = cap
+    ? '<div><span class="k">AgentCap</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerObject(cap.capId) + '">' + short(cap.capId) + '</a></div>' +
+      '<div><span class="k">Scopes</span><span>' + (scopeChips(cap.scopes).map((x) => '<span class="scope-chip">' + x + '</span>').join('') || '<span class="scope-chip none">none</span>') + '</span></div>' +
+      '<div><span class="k">Cap status</span><span class="cap-status ' + (cap.revoked ? 'revoked' : 'active') + '">' + (cap.revoked ? 'revoked' : 'active') + '</span></div>'
+    : '<div><span class="k">AgentCap</span><span class="mono">none loaded</span></div>';
+  const vouchRows = s.vouches.length
+    ? s.vouches.map((v) => '<div class="feed-item"><div class="feed-body"><div class="feed-top"><span class="feed-type">Vouch</span><span class="feed-mod">' + escapeHtml(STATE.repoNameById.get(v.repoId) || short(v.repoId)) + '</span></div><div class="feed-meta"><span>by <a class="link mono" href="' + explorerAddress(v.voucher) + '" target="_blank" rel="noreferrer">' + escapeHtml(nameOrShort(v.voucher)) + '</a></span><a class="link mono" href="' + explorerTx(v.tx) + '" target="_blank" rel="noreferrer">' + short(v.tx) + '</a></div></div></div>').join('')
+    : '<div class="empty-state">No vouches recorded.</div>';
+  const bountyRows = s.bounties.length
+    ? s.bounties.map((b) => '<div class="pr-card"><div class="pr-title">' + escapeHtml(b.title || '(untitled bounty)') + '</div><div class="repo-meta"><div><span class="k">Status</span><span class="mono">' + bountyStatusLabel(b.status) + '</span></div><div><span class="k">Amount</span><span class="mono">' + suiAmount(b.amount) + ' SUI</span></div><div><span class="k">Repo</span><span class="mono">' + escapeHtml(STATE.repoNameById.get(b.repoId) || short(b.repoId)) + '</span></div></div></div>').join('')
+    : '<div class="empty-state">No bounties claimed or paid.</div>';
+  const workRows = [
+    ...s.prs.map((p) => '<div class="vstep ok"><span class="vmark">PR</span><span class="vlabel">' + escapeHtml(p.title || short(p.id)) + '</span><a class="vdetail mono link" target="_blank" rel="noreferrer" href="' + explorerObject(p.id) + '">' + prStatusLabel(p.status) + ' · ' + short(p.id) + '</a></div>'),
+    ...s.reviews.map((v) => '<div class="vstep ok"><span class="vmark">RV</span><span class="vlabel">Review report</span><a class="vdetail mono link" target="_blank" rel="noreferrer" href="' + blobUrl(v.reportBlob) + '">' + short(v.reportBlob) + '</a></div>'),
+  ].join('') || '<div class="empty-state">No PR or review history.</div>';
+  host.innerHTML =
+    '<div class="detail-grid repo-meta">' +
+      '<div><span class="k">Address</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerAddress(addr) + '">' + escapeHtml(nameOrShort(addr)) + '</a></div>' +
+      '<div><span class="k">Tier</span><span class="tier-badge ' + tier.cls + '">' + tier.tier + '</span></div>' +
+      '<div><span class="k">Score</span><span class="score-badge">' + r.score + '</span></div>' +
+      '<div><span class="k">Reliability</span><span class="mono">' + Math.round(s.reliability * 100) + '%</span></div>' +
+      capHtml +
+    '</div>' +
+    '<div class="agent-profile-actions"><button class="cmd-action prove-btn" id="agentVaultBtn">Open memory vault</button></div>' +
+    '<h3 class="detail-h3">Work history</h3><div class="verify-steps">' + workRows + '</div>' +
+    '<h3 class="detail-h3">Vouches</h3>' + vouchRows +
+    '<h3 class="detail-h3">Bounties</h3><div class="card-grid">' + bountyRows + '</div>';
+  const btn = $('agentVaultBtn');
+  if (btn) btn.addEventListener('click', () => proveAgentWork(addr));
+}
+
+/* ---------- Package trust view ---------- */
+function renderPackagesView() {
+  const el = $('packageTrust');
+  if (!el) return;
+  const maintainers = [...new Set(STATE.repos.map((r) => r.owner).filter(Boolean))];
+  const deps = ['MoveStdlib', 'Sui framework'];
+  const releaseRows = STATE.releases.slice(0, 8).map((r) =>
+    '<div class="vstep ok">' +
+      '<span class="vmark">R</span>' +
+      '<span class="vlabel">' + escapeHtml(r.version) + ' · ' + escapeHtml(STATE.repoNameById.get(r.repoId) || short(r.repoId)) + '</span>' +
+      '<span class="vdetail mono" id="pkg-rel-' + r.id + '">checking...</span>' +
+    '</div>').join('') || '<div class="empty-state">No releases available for package trust scoring.</div>';
+  el.innerHTML =
+    '<div class="package-trust-grid">' +
+      '<section class="info-card package-card-main">' +
+        '<div class="agent-card-head"><div class="repo-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></div><h3>Signet Forge Package</h3><span class="tier-badge tier-verified" id="pkgRisk">checking</span></div>' +
+        '<div class="repo-meta detail-grid">' +
+          '<div><span class="k">Package</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerObject(CFG.packageId) + '">' + short(CFG.packageId, 10, 8) + '</a></div>' +
+          '<div><span class="k">MVR alias</span><span class="mono">' + escapeHtml(CFG.mvrName || '@signet/forge') + '</span></div>' +
+          '<div><span class="k">MVR status</span><span class="mono">' + escapeHtml(CFG.mvrStatus || 'raw package id active') + '</span></div>' +
+          '<div><span class="k">Registry</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerObject(CFG.forgeRegistry) + '">' + short(CFG.forgeRegistry, 10, 8) + '</a></div>' +
+          '<div><span class="k">Publish tx</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerTx(CFG.publishTx || '') + '">' + short(CFG.publishTx || '', 10, 8) + '</a></div>' +
+          '<div><span class="k">Toolchain</span><span class="mono">Sui ' + escapeHtml(CFG.toolchainVersion || 'unknown') + '</span></div>' +
+        '</div>' +
+      '</section>' +
+      '<section class="info-card"><h3>Dependencies</h3><div class="agent-market-row">' + deps.map((d) => '<span class="market-pill">' + escapeHtml(d) + '</span>').join('') + '</div><p>Move.toml has no third-party app dependencies; runtime trust comes from the Sui framework and deployed Signet objects.</p></section>' +
+      '<section class="info-card"><h3>Maintainers</h3>' + (maintainers.length ? maintainers.map((m) => '<a class="link mono maint-row" target="_blank" rel="noreferrer" href="' + explorerAddress(m) + '">' + escapeHtml(nameOrShort(m)) + '</a>').join('') : '<p>No repository maintainers loaded yet.</p>') + '</section>' +
+    '</div>' +
+    '<h3 class="detail-h3">Verified releases</h3><div class="verify-steps" id="pkgReleaseChecks">' + releaseRows + '</div>';
+  if (!STATE.releases.length) {
+    const risk = $('pkgRisk'); if (risk) { risk.textContent = 'partial'; risk.className = 'tier-badge tier-contributor'; }
+    return;
+  }
+  Promise.all(STATE.releases.slice(0, 8).map((r) => verifyReleaseBrowser(r.id).then((v) => ({ r, v })).catch(() => ({ r, v: null })))).then((rows) => {
+    let trusted = 0, partial = 0;
+    for (const { r, v } of rows) {
+      const cell = $('pkg-rel-' + r.id);
+      if (!cell) continue;
+      if (v?.pass && v.level >= 3) { trusted++; cell.textContent = v.levelLabel + ' verified'; }
+      else if (v && v.level > 0) { partial++; cell.textContent = v.levelLabel + ' partial'; }
+      else cell.textContent = 'failed';
+    }
+    const risk = $('pkgRisk');
+    if (risk) {
+      if (trusted) { risk.textContent = 'trusted'; risk.className = 'tier-badge tier-trusted'; }
+      else if (partial) { risk.textContent = 'partial'; risk.className = 'tier-badge tier-contributor'; }
+      else { risk.textContent = 'failed'; risk.className = 'tier-badge tier-new'; }
+    }
   });
 }
 
@@ -1375,7 +1741,9 @@ async function showReleaseDetail(releaseId) {
       '<div><span class="k">Repo</span><span class="mono">' + escapeHtml(STATE.repoNameById.get(r.repoId) || short(r.repoId)) + '</span></div>' +
       '<div><span class="k">Published by</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.publishedBy) + '">' + short(r.publishedBy) + '</a></div>' +
       '<div><span class="k">Object</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.id) + '">' + short(r.id) + '</a></div>' +
+      (r.mergedPrId ? '<div><span class="k">Merged PR</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.mergedPrId) + '">' + short(r.mergedPrId) + '</a></div>' : '') +
     '</div>' +
+    releaseGraph +
     '<h3 class="detail-h3">Provenance chain</h3>' +
     '<div class="prov-chain">' +
       chainNode('Source snapshot', r.sourceSnapshot, 'g', 'prev-src') +
@@ -1392,12 +1760,18 @@ async function showReleaseDetail(releaseId) {
     '<h3 class="detail-h3">Provenance verification ' +
       '<button class="back-btn" id="relVerifyBtn" style="float:right;padding:7px 14px">Verify this release</button></h3>' +
     '<div id="relVerifyOut"><div class="empty-state">Verifying provenance…</div></div>' +
+    '<div class="agent-profile-actions" style="margin-top:12px"><button class="cmd-action" id="relExportBtn">Export in-toto/SLSA JSON</button></div>' +
     '<div class="cmd-note" style="margin-top:8px">Also runnable offline: <span class="mono">npm run forge -- verify --release ' + short(r.id) + '</span> — same checks, no key needed.</div>';
 
   // run verify automatically (shows SLSA-style level badge + steps)
   runVerify(r.id, $('relVerifyOut'), null);
   const vbtn = $('relVerifyBtn');
   if (vbtn) vbtn.addEventListener('click', () => runVerify(r.id, $('relVerifyOut'), vbtn));
+  const exportBtn = $('relExportBtn');
+  if (exportBtn) exportBtn.addEventListener('click', async () => {
+    const att = await releaseAttestationBrowser(r.id);
+    downloadJson('signet-' + r.version + '-attestation.json', att);
+  });
 
   // blob previews
   const previews = [
@@ -1446,11 +1820,12 @@ function wireReleaseRows(scope) {
 function buildSearchIndex() {
   const idx = [];
   for (const r of STATE.repos) idx.push({ kind: 'repo', label: r.name, sub: short(r.id), go: () => { activateNav('repos'); showRepoDetail(r.id); } });
+  idx.push({ kind: 'package', label: CFG.mvrName || '@signet/forge', sub: short(CFG.packageId), go: () => activateNav('packages') });
   for (const p of STATE.prs) idx.push({ kind: 'pr', label: p.title || short(p.id), sub: short(p.id), go: () => { activateNav('prs'); showPrDetail(p.id); } });
   for (const r of STATE.releases) idx.push({ kind: 'release', label: r.version, sub: short(r.id), go: () => { activateNav('releases'); showReleaseDetail(r.id); } });
   for (const i of STATE.issues) idx.push({ kind: 'issue', label: i.title || short(i.id), sub: short(i.id), go: () => activateNav('issues') });
   for (const b of STATE.bounties) idx.push({ kind: 'bounty', label: b.title || short(b.id), sub: short(b.id), go: () => activateNav('bounties') });
-  for (const a of STATE.reps) idx.push({ kind: 'agent', label: short(a.agent, 10, 6), sub: 'reputation', go: () => activateNav('agents') });
+  for (const a of STATE.reps) idx.push({ kind: 'agent', label: short(a.agent, 10, 6), sub: 'profile', go: () => { activateNav('agents'); showAgentDetail(a.agent); } });
   return idx;
 }
 
@@ -1556,11 +1931,12 @@ function openSettings() {
 
 /** Re-render all views from cached STATE (used after explorer/name changes). */
 function rerenderAll() {
-  renderReposView(); renderPRsView('all'); renderReleasesView(); renderAgentsView();
+  renderReposView(); renderPRsView('all'); renderReleasesView(); renderAgentsView(); renderPackagesView();
   renderIssuesView(); renderBountiesView(); renderActivityView(); renderVerifyView();
   renderPRTable('all');
   const repoNameById = STATE.repoNameById;
   renderReleases(STATE.releases, repoNameById); renderReputation(STATE.reps);
+  renderSponsorDashboard();
 }
 
 /** Help & concepts modal: what Signet is, a short glossary, the integrations,
@@ -1579,12 +1955,12 @@ function openHelp() {
       '<li><b>Provenance chain</b> — source → artifact → review → release, each a verifiable on-chain link.</li>' +
       '<li><b>AgentCap</b> — scoped, revocable capability letting an agent open PRs / review / run CI.</li>' +
       '<li><b>Reputation</b> — earned on-chain (builders: apps·5 + stars·3 + remixes·4).</li>' +
-      '<li><b>Seal</b> — client-side encryption for private apps; only the builder can decrypt (on-chain gated).</li>' +
+      '<li><b>Seal</b> — client-side encryption for private apps; builders can keep owner-only access or allowlist collaborators through the v2 workspace policy.</li>' +
       '<li><b>Paid fork</b> — a builder can charge to remix their app; the fee is paid to them on-chain.</li>' +
       '</ul>' +
       '<h4 class="help-h">Integrations</h4><ul class="help-gloss">' +
       '<li><b>Walrus</b> — blob storage (publish + renew).</li>' +
-      '<li><b>Seal</b> — owner-only encryption for private apps.</li>' +
+      '<li><b>Seal</b> — builder/member-gated encryption for private apps.</li>' +
       '<li><b>zkLogin</b> — sign in with Google, no wallet needed (optional).</li>' +
       '<li><b>SuiNS</b> — reverse-resolves addresses to human names.</li>' +
       '<li><b>MCP</b> — agents build + publish programmatically (see the MCP tab).</li>' +
@@ -1618,20 +1994,25 @@ function renderOnboarding() {
   if (localStorage.getItem('wf.onboarded')) return;
   const host = $('view-dashboard');
   if (!host) return;
+  const hostedReady = zkConfigured() && SETTINGS.sponsorUrl && CFG.llmProxyUrl;
   const card = document.createElement('div');
   card.className = 'onboard';
   card.innerHTML =
-    '<div><h3>Welcome to Signet 🔏</h3>' +
-    '<p>An agent-native release network on Sui + Walrus. Humans connect a wallet and act in-browser; agents act via MCP — both bounded by the same on-chain capabilities. Every release has a verifiable provenance chain.</p></div>' +
+    '<div><h3>Welcome to Signet</h3>' +
+    (hostedReady
+      ? '<p>Start with Google sign-in, sponsored gas, and the hosted LLM proxy: no wallet, no SUI, no API key. Wallet and BYOK stay available as fallbacks.</p></div>'
+      : '<p>An agent-native release network on Sui + Walrus. Connect a wallet or configure zkLogin + sponsor + hosted LLM for the no-wallet path. Every release has a verifiable provenance chain.</p></div>') +
     '<div class="onboard-cta">' +
-    '<button class="btn-primary" id="obPlay">Open the Playground</button>' +
+    (hostedReady ? '<button class="btn-primary" id="obGoogle">Continue with Google</button>' : '') +
+    '<button class="' + (hostedReady ? 'btn-ghost' : 'btn-primary') + '" id="obPlay">Open the Playground</button>' +
     '<button class="btn-ghost" id="obConnect">Connect wallet</button>' +
     '<button class="btn-ghost" id="obVerify">Verify a release</button>' +
     '<button class="btn-ghost" id="obHelp">How it works</button></div>' +
-    '<button class="onboard-x" id="obX" title="dismiss">×</button>';
+    '<button class="onboard-x" id="obX" title="dismiss">x</button>';
   host.insertBefore(card, host.firstChild);
   const done = () => { localStorage.setItem('wf.onboarded', '1'); card.remove(); };
   $('obX').addEventListener('click', done);
+  $('obGoogle')?.addEventListener('click', () => { done(); beginZkLogin(); });
   $('obPlay').addEventListener('click', () => { done(); activateNav('playground'); });
   $('obVerify').addEventListener('click', () => { done(); activateNav('verify'); });
   $('obConnect').addEventListener('click', () => { done(); import('./wallet.js').then((m) => m.connectWallet()); });

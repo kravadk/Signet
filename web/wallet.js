@@ -6,9 +6,9 @@
    ============================================================ */
 
 import { getWallets } from 'https://esm.sh/@mysten/wallet-standard@0.16.0';
-import { Transaction } from 'https://esm.sh/@mysten/sui@1.18.0/transactions';
-import { getFaucetHost, requestSuiFromFaucetV1 } from 'https://esm.sh/@mysten/sui@1.18.0/faucet';
-import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
+import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
+import { getFaucetHost, requestSuiFromFaucetV1 } from 'https://esm.sh/@mysten/sui@1.30.0/faucet';
+import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 import {
   CFG, SETTINGS, sui, STATE, $, short, suiAmount, escapeHtml,
   explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW, withTimeout,
@@ -362,13 +362,15 @@ export async function actPostBounty(repoId) {
   formModal('Post a bounty', [
     { id: 'title', label: 'Title', type: 'text' },
     { id: 'amount', label: 'Amount (SUI)', type: 'number' },
+    { id: 'minScore', label: 'Minimum agent score (0 = anyone)', type: 'number', value: '0' },
   ], async (v, setBusy) => {
     setBusy(true);
     try {
       const mist = Math.round(Number(v.amount) * 1e9);
+      const minScore = Math.max(0, Math.floor(Number(v.minScore) || 0));
       const tx = new Transaction();
       const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(mist)]);
-      pkgCall(tx, 'bounty::post_bounty', [tx.object(repoId), tx.pure.string(v.title), coin]);
+      pkgCall(tx, 'bounty::post_bounty', [tx.object(repoId), tx.pure.string(v.title), coin, tx.pure.u64(minScore)]);
       const r = await signAndRun(tx, 'Bounty posted'); if (r) closeModal();
     } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
   });
@@ -442,7 +444,7 @@ function formModal(title, fields, onSubmit) {
   const body = fields.map((f) =>
     f.type === 'textarea'
       ? `<label>${f.label}</label><textarea id="fm-${f.id}"></textarea>`
-      : `<label>${f.label}</label><input type="${f.type}" id="fm-${f.id}">`).join('') +
+      : `<label>${f.label}</label><input type="${f.type}" id="fm-${f.id}" value="${escapeHtml(f.value || '')}">`).join('') +
     '<div class="modal-actions"><button class="btn-ghost" id="fm-cancel">Cancel</button>' +
     '<button class="btn-primary" id="fm-submit">Sign &amp; submit</button></div>';
   openModal({ title, bodyHtml: body, onMount(m) {

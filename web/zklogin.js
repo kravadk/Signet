@@ -8,12 +8,12 @@
    service — configured in Playground settings (SETTINGS.zk*). Until those are
    set, the "Sign in with Google" button stays hidden.
    ============================================================ */
-import { Ed25519Keypair } from 'https://esm.sh/@mysten/sui@1.18.0/keypairs/ed25519';
-import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
+import { Ed25519Keypair } from 'https://esm.sh/@mysten/sui@1.30.0/keypairs/ed25519';
+import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 import {
   generateNonce, generateRandomness, getExtendedEphemeralPublicKey,
   jwtToAddress, genAddressSeed, getZkLoginSignature,
-} from 'https://esm.sh/@mysten/sui@1.18.0/zklogin';
+} from 'https://esm.sh/@mysten/sui@1.30.0/zklogin';
 import { SETTINGS, sui, STATE } from './shared.js';
 import { toast } from './ui.js';
 

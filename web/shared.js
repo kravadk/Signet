@@ -4,8 +4,8 @@
    talks to the same SuiClient, CFG and STATE.
    ============================================================ */
 
-import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.18.0/client';
-import { formatAddress, MIST_PER_SUI, isValidSuiAddress, isValidSuiObjectId } from 'https://esm.sh/@mysten/sui@1.18.0/utils';
+import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.30.0/client';
+import { formatAddress, MIST_PER_SUI, isValidSuiAddress, isValidSuiObjectId } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 
 /* ---------- Config (per-network, mirrors move/signet/deployments.json) ----------
    Network picked from ?network= query param or localStorage 'wf.network', else testnet.
@@ -14,7 +14,12 @@ const DEPLOYMENTS = {
   testnet: {
     // Original package — existing repos/PRs/releases events stay under this id.
     packageId: '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1',
+    mvrName: '@signet/forge',
+    mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02',
+    publishTx: '6qxmqi9nTQ1SUfZf4VqH3pH4a7HkssPyVyGx4QbX4HhF',
+    toolchainVersion: '1.73.0',
+    previousPackageId: '0xebe4bc0fb776337fcf951df4985fa4ee2436ddb8a51ef422d9a3be159919bda4',
     // Upgraded package (playground + builder-reputation + moderation + remix-reputation
     // + versioning/update_app + handles/NameRegistry + Treasury/tip_app_v2 + app-bounties
     // + paid-fork set_fork_price/pay_to_fork + private apps set_private/seal_approve_app_owner) — Playground WRITES/calls.
@@ -40,6 +45,7 @@ const DEPLOYMENTS = {
     treasury: '0x9062ed0b2d6506d9108632bead5a6a466320a85bf51359b00611c94fd89ad921',
     forkRegistry: '0xc774e8caffee5289079454422c2adb7ed425e58e1e657e8fcc0534971d753909',
     privacyRegistry: '0x1c33121003f42314aa424cebc63c41eab346744eef0c871f98c73d24f8ecd20f',
+    // workspaceRegistry: '<create_workspace_registry object id after team-private v2 deploy>',
     appBounties: true, // package v7 (post/award/cancel_app_bounty) live on testnet
     paidFork: true, // package v8 (set_fork_price/pay_to_fork) live on testnet
     privateApps: true, // package v9 (set_private/seal_approve_app_owner) live on testnet
@@ -48,7 +54,11 @@ const DEPLOYMENTS = {
   },
   mainnet: {
     packageId: '0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54',
+    mvrName: '@signet/forge',
+    mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0xc33128b32c015cf010116499d87bebb9899aec410b790902bf6208b992fa2071',
+    publishTx: '7Um2fePJjJnaLXwbiQ8Jbv3z4nBp5TApb4MQFm7Ur7Ne',
+    toolchainVersion: '1.73.0',
     playgroundPackageId: '0x60e6933e4b92c4deb2f9afb37c143581d1bd589b2f2a32d76c9c2189a287b36a',
     // On mainnet the playground module first appeared at 0x6838f792, so events
     // are read under that original id (not the latest moderation upgrade).
@@ -67,6 +77,7 @@ const DEPLOYMENTS = {
     treasury: '0x37be3e8a75745aa9e5982a117d59a6fc1ea5d090eeff2587e1d31d145a345f82',
     forkRegistry: '0x37f94756fc0fc31b1ade28feb64eb3b999889b1fed95bb6b88ea05d3d9aff6b7',
     privacyRegistry: '0xe86037660a532386e39d6fb787ae138312af8cd5d6ea046955ce30188ef19935',
+    // workspaceRegistry: '<create_workspace_registry object id after team-private v2 deploy>',
     appBounties: true, // package v7 (post/award/cancel_app_bounty) live on mainnet
     paidFork: true, // paid-fork (set_fork_price/pay_to_fork) live on mainnet
     privateApps: true, // private apps (set_private/seal_approve_app_owner) live on mainnet
@@ -191,6 +202,7 @@ export function escapeHtml(s) {
 export const STATE = {
   loaded: false,
   repos: [], prs: [], releases: [], reps: [], issues: [], bounties: [],
+  reviewEvents: [], vouchEvents: [], bountyEvents: { claimed: [], submitted: [], paid: [] },
   activity: { perMod: {}, total: 0, tsBuckets: new Map(), feed: [] },
   repoNameById: new Map(),
   agentCaps: new Map(),

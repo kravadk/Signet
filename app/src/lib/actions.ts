@@ -92,6 +92,54 @@ export async function releaseRead(args: { releaseId: string }) {
   };
 }
 
+export async function releaseAttestation(args: { releaseId: string }) {
+  const rel = await getRelease(args.releaseId);
+  if (!rel) throw new Error(`Release not found: ${args.releaseId}`);
+  const [repo, manifest, verify] = await Promise.all([
+    getRepo(rel.repoId),
+    fetchManifest(rel.sourceSnapshot),
+    verifyRelease(args.releaseId),
+  ]);
+  const mergedPr = rel.mergedPrId ? await getPullRequest(rel.mergedPrId).catch(() => null) : null;
+  return {
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [{
+      name: `${repo?.name ?? rel.repoId}@${rel.version}`,
+      digest: { treeHash: manifest?.treeHash ?? rel.sourceSnapshot },
+    }],
+    predicateType: "https://slsa.dev/provenance/v1",
+    predicate: {
+      buildDefinition: {
+        buildType: "https://signet.dev/release/v2",
+        externalParameters: {
+          network: _vNet,
+          packageId: _vPkg,
+          repoId: rel.repoId,
+          releaseId: rel.id,
+          mergedPrId: rel.mergedPrId ?? null,
+          version: rel.version,
+        },
+        resolvedDependencies: [
+          { uri: `sui:package:${_vPkg}`, digest: { suiObjectId: _vPkg } },
+          { uri: `sui:repo:${rel.repoId}`, digest: { suiObjectId: rel.repoId } },
+          ...(mergedPr ? [{ uri: `sui:pr:${mergedPr.id}`, digest: { suiObjectId: mergedPr.id } }] : []),
+          { uri: `walrus:blob:${rel.sourceSnapshot}`, digest: { treeHash: manifest?.treeHash ?? "" } },
+          { uri: `walrus:blob:${rel.buildArtifact}` },
+          { uri: `walrus:blob:${rel.testReport}` },
+        ],
+      },
+      runDetails: {
+        builder: { id: "signet-forge" },
+        metadata: {
+          invocationId: rel.id,
+          verificationLevel: verify.levelLabel,
+          verified: verify.pass,
+        },
+      },
+    },
+  };
+}
+
 // ===== Verify (read-only provenance check) =====
 
 const _vNet = process.env.FORGE_NETWORK === "mainnet" ? "mainnet" : "testnet";
@@ -169,11 +217,24 @@ export async function verifyRelease(releaseId: string): Promise<VerifyResult> {
     detail: manifest ? `${manifest.files.length} files · ${manifest.treeHash.slice(0, 12)}…` : "manifest unavailable",
   });
 
-  // 4. find a merged PR whose head == release source (reviewed == released)
+  // 4. Prefer the v2 direct ReleaseLinked -> merged PR edge. Old releases fall
+  // back to scanning merged PR events by source snapshot.
   let chainOk = false;
   let reviewedOk = false;
   let chainDetail = "no merged PR matched the release source";
-  try {
+  if (rel.mergedPrId) {
+    const pr = await getPullRequest(rel.mergedPrId).catch(() => null);
+    if (pr) {
+      chainOk = pr.repoId === rel.repoId && pr.status === 1 && pr.headSnapshot === rel.sourceSnapshot;
+      reviewedOk = (pr.reviewRefs?.length ?? 0) > 0;
+      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}вЂ¦` +
+        (chainOk ? " head == release source" : " does not match release source") +
+        (reviewedOk ? ` В· ${pr.reviewRefs.length} signed review(s)` : " В· no review");
+    } else {
+      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}вЂ¦ not found`;
+    }
+  }
+  if (!chainOk) try {
     // Cursor-paginate PrMerged so a release's PR isn't missed when the repo has
     // more than one page of merges (correctness, not just the most-recent page).
     const prIds: string[] = [];

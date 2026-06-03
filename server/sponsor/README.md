@@ -18,8 +18,14 @@ The sponsor co-signs **only**:
 
 Anything else — a different package/module, a non-MoveCall command, or a value-moving
 call (`tip_app*`, `*_app_bounty`, `withdraw_treasury`) — is **rejected**, so the sponsor
-can't be tricked into paying for arbitrary work or draining itself. Plus: per-IP rate
-limit, request-size cap, gas budget cap, CORS pinned to your origin.
+can't be tricked into paying for arbitrary work or draining itself. Plus: per-IP,
+per-wallet and per-function quotas, a daily sponsor budget, request-size cap, gas
+budget cap, and CORS pinned to your origin.
+
+Publish/update/remix sponsorship can be tightened with `SPONSOR_WRITE_MODE`:
+- `open` - default, all validated users can use sponsored writes.
+- `allowlist` - only `ALLOWED_SENDERS` can use sponsored publish/update/remix.
+- `stake` - sender must have at least `STAKE_MIN_MIST` total SUI balance.
 
 ## Run locally
 ```bash
@@ -34,6 +40,7 @@ curl localhost:8788/health
 - `POST /sponsor` — body `{ sender, txKindBytes }` (base64 `onlyTransactionKind`)
   → `{ txBytes, sponsorSignature }`
 - `GET /health` → `{ ok, sponsor, network }`
+- `GET /dashboard` → balance, estimated spend, rejected calls, rate-limit hits and quotas
 
 Client: build `await tx.build({ client, onlyTransactionKind: true })`, POST it, have the
 wallet sign the returned `txBytes`, then

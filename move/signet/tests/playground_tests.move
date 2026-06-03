@@ -7,7 +7,7 @@ use sui::test_scenario::{Self as ts, Scenario};
 use sui::clock;
 use sui::coin;
 use sui::sui::SUI;
-use signet::playground::{Self as pg, PublishedApp, StarRegistry, BuilderBoard, FlagRegistry, NameRegistry, Treasury, AppBounty, ForkRegistry, PrivacyRegistry};
+use signet::playground::{Self as pg, PublishedApp, StarRegistry, BuilderBoard, FlagRegistry, NameRegistry, Treasury, AppBounty, ForkRegistry, PrivacyRegistry, WorkspaceRegistry};
 
 const BUILDER: address = @0xA;
 const VISITOR: address = @0xB;
@@ -717,6 +717,42 @@ fun test_non_builder_cannot_set_private() {
         let app = scen.take_shared<PublishedApp>();
         let mut reg = scen.take_shared<PrivacyRegistry>();
         pg::set_private(&mut reg, &app, true, scen.ctx());
+        ts::return_shared(app);
+        ts::return_shared(reg);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_workspace_invite_and_revoke_member() {
+    let mut scen = setup();
+    publish_one(&mut scen);
+    scen.next_tx(BUILDER);
+    {
+        let app = scen.take_shared<PublishedApp>();
+        let mut reg = scen.take_shared<WorkspaceRegistry>();
+        let id = object::id(&app);
+        assert!(!pg::is_workspace_member(&reg, id, VISITOR), 0);
+        pg::invite_workspace_member(&mut reg, &app, VISITOR, scen.ctx());
+        assert!(pg::is_workspace_member(&reg, id, VISITOR), 1);
+        pg::revoke_workspace_member(&mut reg, &app, VISITOR, scen.ctx());
+        assert!(!pg::is_workspace_member(&reg, id, VISITOR), 2);
+        ts::return_shared(app);
+        ts::return_shared(reg);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = signet::playground::ENotBuilder)]
+fun test_non_builder_cannot_invite_workspace_member() {
+    let mut scen = setup();
+    publish_one(&mut scen);
+    scen.next_tx(VISITOR);
+    {
+        let app = scen.take_shared<PublishedApp>();
+        let mut reg = scen.take_shared<WorkspaceRegistry>();
+        pg::invite_workspace_member(&mut reg, &app, TIPPER, scen.ctx());
         ts::return_shared(app);
         ts::return_shared(reg);
     };

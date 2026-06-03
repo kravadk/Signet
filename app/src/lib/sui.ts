@@ -1,10 +1,9 @@
 /**
  * Sui client + PTB builders for Signet.
  *
- * Loads the keypair from the local Sui CLI keystore (the same wallet the CLI
- * signs with — we never take a raw private key as input), connects to testnet,
- * and exposes one function per on-chain action. Each builds a programmable
- * transaction calling the deployed `signet` package.
+ * Loads the keypair from the local Sui CLI keystore by default. CI can supply
+ * FORGE_OWNER_KEY (suiprivkey1...) instead, so GitHub Actions can sign owner
+ * commands without reconstructing a Sui CLI keystore.
  */
 
 import { homedir } from "node:os";
@@ -16,6 +15,7 @@ import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import type { Keypair } from "@mysten/sui/cryptography";
 
 // Resolve deployments.json relative to the move package (sibling of app/).
@@ -93,6 +93,15 @@ export function loadKeypairFromKeystore(): Keypair {
   return keypairFromEntry(keys[0]);
 }
 
+function keypairFromOwnerEnv(): Keypair | null {
+  const raw = process.env.FORGE_OWNER_KEY;
+  if (!raw || raw.trim() === "") return null;
+  const { schema, secretKey } = decodeSuiPrivateKey(raw.trim());
+  if (schema === "ED25519") return Ed25519Keypair.fromSecretKey(secretKey);
+  if (schema === "Secp256k1") return Secp256k1Keypair.fromSecretKey(secretKey);
+  throw new Error(`Unsupported key schema in FORGE_OWNER_KEY: ${schema}`);
+}
+
 export interface ForgeContext {
   client: SuiClient;
   keypair: Keypair;
@@ -101,7 +110,7 @@ export interface ForgeContext {
 }
 
 export function makeContext(network = "testnet"): ForgeContext {
-  return makeContextWithKeypair(loadKeypairFromKeystore(), network);
+  return makeContextWithKeypair(keypairFromOwnerEnv() ?? loadKeypairFromKeystore(), network);
 }
 
 /**
@@ -276,20 +285,35 @@ export async function publishRelease(
     sourceSnapshot: string;
     buildArtifact: string;
     testReport: string;
+    mergedPrId?: string;
   },
 ) {
   const tx = new Transaction();
-  tx.moveCall({
-    target: `${ctx.deployment.packageId}::release::publish_release`,
-    arguments: [
-      tx.object(args.repoId),
-      tx.object(args.ownerCapId),
-      tx.pure.string(args.version),
-      tx.pure.string(args.sourceSnapshot),
-      tx.pure.string(args.buildArtifact),
-      tx.pure.string(args.testReport),
-    ],
-  });
+  if (args.mergedPrId) {
+    tx.moveCall({
+      target: `${ctx.deployment.packageId}::release::publish_release_v2`,
+      arguments: [
+        tx.object(args.repoId),
+        tx.object(args.ownerCapId),
+        tx.object(args.mergedPrId),
+        tx.pure.string(args.version),
+        tx.pure.string(args.buildArtifact),
+        tx.pure.string(args.testReport),
+      ],
+    });
+  } else {
+    tx.moveCall({
+      target: `${ctx.deployment.packageId}::release::publish_release`,
+      arguments: [
+        tx.object(args.repoId),
+        tx.object(args.ownerCapId),
+        tx.pure.string(args.version),
+        tx.pure.string(args.sourceSnapshot),
+        tx.pure.string(args.buildArtifact),
+        tx.pure.string(args.testReport),
+      ],
+    });
+  }
   return sign(ctx, tx);
 }
 

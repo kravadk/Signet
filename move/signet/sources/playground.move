@@ -34,6 +34,7 @@ const ENotForkable: u64 = 11;  // app has no fork price set (free to remix, or n
 const EUnderpaid: u64 = 12;    // payment below the builder-set fork price
 const ENotAppOwner: u64 = 13;  // Seal: requester is not the app's builder
 const ESealIdMismatch: u64 = 14; // Seal: identity not namespaced to this app
+const ENotWorkspaceMember: u64 = 15; // Seal: requester is not builder or allowlisted
 
 /// Protocol fee on tips, basis points (2.5%) — mirrors bounty.move.
 const FEE_BPS: u64 = 250;
@@ -129,12 +130,21 @@ public struct ForkRegistry has key {
 }
 
 /// Privacy flag book (separate shared object, upgrade-safe). A builder can mark
-/// their app private: the app's Walrus archive is then Seal-encrypted client-side,
-/// and only the builder can decrypt it (policy `seal_approve_app_owner`). The flag
-/// lets the gallery/viewer know to run the decrypt gate. Absent / false = public.
+/// their app private: the app's Walrus archive is then Seal-encrypted client-side.
+/// The default policy is owner-only; the v2 workspace policy can additionally
+/// allow listed collaborators. Absent / false = public.
 public struct PrivacyRegistry has key {
     id: UID,
-    private: Table<ID, bool>,  // app_id -> private (Seal-encrypted, owner-only)
+    private: Table<ID, bool>,  // app_id -> private (Seal-encrypted)
+}
+
+/// Team-private workspace registry (separate shared object, upgrade-safe).
+/// Keeps allowlisted collaborators outside PublishedApp layout so existing apps
+/// stay compatible. Owner-only private apps remain the default when no member is
+/// listed for an app.
+public struct WorkspaceRegistry has key {
+    id: UID,
+    members: Table<ID, VecSet<address>>, // app_id -> allowed collaborators
 }
 
 // ===== Events =====
@@ -162,6 +172,8 @@ public struct AppBountyCancelled has copy, drop { bounty_id: ID, poster: address
 public struct ForkPriceSet has copy, drop { app_id: ID, builder: address, price: u64 }
 public struct AppForkPaid has copy, drop { app_id: ID, payer: address, builder: address, price: u64, fee: u64 }
 public struct AppPrivacySet has copy, drop { app_id: ID, builder: address, private: bool }
+public struct WorkspaceMemberInvited has copy, drop { app_id: ID, builder: address, member: address }
+public struct WorkspaceMemberRevoked has copy, drop { app_id: ID, builder: address, member: address }
 
 // ===== Registry bootstrap =====
 // NOTE: Sui forbids an `init` in a module that is ADDED during a package upgrade
@@ -205,6 +217,11 @@ public fun create_fork_registry(ctx: &mut TxContext) {
 /// Create the shared PrivacyRegistry. Call exactly once after the upgrade.
 public fun create_privacy_registry(ctx: &mut TxContext) {
     transfer::share_object(PrivacyRegistry { id: object::new(ctx), private: table::new(ctx) });
+}
+
+/// Create the shared WorkspaceRegistry. Call exactly once after the upgrade.
+public fun create_workspace_registry(ctx: &mut TxContext) {
+    transfer::share_object(WorkspaceRegistry { id: object::new(ctx), members: table::new(ctx) });
 }
 
 // ===== Moderation =====
@@ -273,6 +290,7 @@ public fun init_for_testing(ctx: &mut TxContext) {
     create_treasury(ctx.sender(), ctx);
     create_fork_registry(ctx);
     create_privacy_registry(ctx);
+    create_workspace_registry(ctx);
 }
 
 // ===== Publish / remix =====
@@ -551,13 +569,14 @@ public fun pay_to_fork(reg: &ForkRegistry, app: &PublishedApp, treasury: &mut Tr
     event::emit(AppForkPaid { app_id, payer: ctx.sender(), builder: app.builder, price, fee });
 }
 
-// ===== Private apps (Seal owner-only) =====
+// ===== Private apps (Seal owner-only + team-private v2) =====
 //
 // A private app's Walrus archive is Seal-encrypted client-side under an identity
 // namespaced to the app's object id (`app_id_bytes || suffix`). Seal key servers
-// call `seal_approve_app_owner` with that identity; the call aborts unless the
-// requester is the app's builder, so only the builder can decrypt. The flag in
-// PrivacyRegistry just tells the viewer to run the decrypt gate.
+// call an approval function with that identity. The v1 owner policy aborts unless
+// the requester is the app's builder; the v2 workspace policy also admits
+// allowlisted collaborators. The flag in PrivacyRegistry just tells the viewer to
+// run the decrypt gate.
 
 /// The builder marks (or unmarks) their app private. Builder-only.
 public fun set_private(reg: &mut PrivacyRegistry, app: &PublishedApp, private: bool, ctx: &TxContext) {
@@ -571,9 +590,45 @@ public fun set_private(reg: &mut PrivacyRegistry, app: &PublishedApp, private: b
     event::emit(AppPrivacySet { app_id, builder: app.builder, private });
 }
 
-/// Read: whether an app is marked private (Seal-encrypted, owner-only).
+/// Read: whether an app is marked private (Seal-encrypted).
 public fun is_private(reg: &PrivacyRegistry, app_id: ID): bool {
     if (table::contains(&reg.private, app_id)) { *table::borrow(&reg.private, app_id) } else { false }
+}
+
+fun ensure_workspace(reg: &mut WorkspaceRegistry, app_id: ID): &mut VecSet<address> {
+    if (!table::contains(&reg.members, app_id)) {
+        table::add(&mut reg.members, app_id, vec_set::empty<address>());
+    };
+    table::borrow_mut(&mut reg.members, app_id)
+}
+
+/// Builder allowlists a collaborator for a private app workspace.
+public fun invite_workspace_member(reg: &mut WorkspaceRegistry, app: &PublishedApp, member: address, ctx: &TxContext) {
+    assert!(ctx.sender() == app.builder, ENotBuilder);
+    let app_id = object::id(app);
+    let set = ensure_workspace(reg, app_id);
+    if (!vec_set::contains(set, &member)) {
+        vec_set::insert(set, member);
+    };
+    event::emit(WorkspaceMemberInvited { app_id, builder: app.builder, member });
+}
+
+/// Builder revokes a collaborator from a private app workspace.
+public fun revoke_workspace_member(reg: &mut WorkspaceRegistry, app: &PublishedApp, member: address, ctx: &TxContext) {
+    assert!(ctx.sender() == app.builder, ENotBuilder);
+    let app_id = object::id(app);
+    if (table::contains(&reg.members, app_id)) {
+        let set = table::borrow_mut(&mut reg.members, app_id);
+        if (vec_set::contains(set, &member)) {
+            vec_set::remove(set, &member);
+        };
+    };
+    event::emit(WorkspaceMemberRevoked { app_id, builder: app.builder, member });
+}
+
+/// Read: whether an address is allowlisted for an app workspace.
+public fun is_workspace_member(reg: &WorkspaceRegistry, app_id: ID, member: address): bool {
+    table::contains(&reg.members, app_id) && vec_set::contains(table::borrow(&reg.members, app_id), &member)
 }
 
 /// True if `id` begins with `app`'s object-id bytes (the Seal namespace check).
@@ -593,6 +648,13 @@ fun id_in_app(app: &PublishedApp, id: &vector<u8>): bool {
 entry fun seal_approve_app_owner(id: vector<u8>, app: &PublishedApp, ctx: &TxContext) {
     assert!(ctx.sender() == app.builder, ENotAppOwner);
     assert!(id_in_app(app, &id), ESealIdMismatch);
+}
+
+/// Seal policy v2: builder OR allowlisted workspace member may decrypt.
+entry fun seal_approve_app_member(id: vector<u8>, app: &PublishedApp, reg: &WorkspaceRegistry, ctx: &TxContext) {
+    assert!(id_in_app(app, &id), ESealIdMismatch);
+    let sender = ctx.sender();
+    assert!(sender == app.builder || is_workspace_member(reg, object::id(app), sender), ENotWorkspaceMember);
 }
 
 // ===== Read accessors =====

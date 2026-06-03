@@ -12,9 +12,10 @@
    replace BYOK later without touching the UI.
    ============================================================ */
 
-import { Transaction } from 'https://esm.sh/@mysten/sui@1.18.0/transactions';
+import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import {
   CFG, SETTINGS, saveSettings, sui, STATE, $, short, escapeHtml, blobUrl, explorerObject, explorerAddress, suiAmount, MIST,
+  isValidSuiAddress,
 } from './shared.js';
 import { toast, openModal, closeModal } from './ui.js';
 import {
@@ -34,12 +35,23 @@ const PG_EVENT = CFG.playgroundEventPkg || PG_PKG;
 const PG_EVENT_PKGS = (CFG.playgroundEventPkgs && CFG.playgroundEventPkgs.length) ? CFG.playgroundEventPkgs : [PG_EVENT];
 async function pgEvents(structName, { limit = 200, order = 'descending' } = {}) {
   const seen = new Set(); const out = [];
-  const results = await Promise.all(PG_EVENT_PKGS.map((pkg) =>
-    sui.queryEvents({ query: { MoveEventType: `${pkg}::playground::${structName}` }, limit, order }).then((r) => r.data, () => [])));
-  for (const data of results) for (const e of data) {
-    const k = `${e.id?.txDigest}:${e.id?.eventSeq}`;
-    if (!seen.has(k)) { seen.add(k); out.push(e); }
-  }
+  const perPkgLimit = Math.max(1, limit);
+  await Promise.all(PG_EVENT_PKGS.map(async (pkg) => {
+    let cursor = null; let pages = 0; let count = 0;
+    do {
+      const r = await sui.queryEvents({
+        query: { MoveEventType: `${pkg}::playground::${structName}` },
+        cursor, limit: Math.min(50, perPkgLimit - count), order,
+      }).catch(() => null);
+      if (!r?.data?.length) break;
+      for (const e of r.data) {
+        const k = `${e.id?.txDigest}:${e.id?.eventSeq}`;
+        if (!seen.has(k)) { seen.add(k); out.push(e); count++; }
+      }
+      cursor = r.nextCursor;
+      if (!r.hasNextPage || count >= perPkgLimit) break;
+    } while (cursor && ++pages < 20);
+  }));
   return out;
 }
 const pgCall = (tx, fn, args) => tx.moveCall({ target: `${PG_PKG}::${fn}`, arguments: args });
@@ -220,6 +232,7 @@ const pg = {
   busy: false,
   gallery: [],           // loaded PublishedApp records
   handles: new Map(),    // builder address -> claimed handle
+  workspaces: new Map(), // app_id -> Set<member address>
   bounties: [],          // loaded open AppBounty records
   filter: 'newest',
   search: '',
@@ -647,6 +660,7 @@ export async function loadGallery() {
     await loadModeration();
     await loadForkPrices();
     await loadPrivacy();
+    await loadWorkspaceMembers();
     await loadHandles();
     renderGallery();
     loadBounties().then(renderBounties);
@@ -696,6 +710,31 @@ async function loadPrivacy() {
     }
   } catch { /* privacy events may not exist yet on this network — treat as public */ }
   for (const a of pg.gallery) a.private = priv.get(a.id) || false;
+}
+
+/* Team-private workspaces: additive v2 privacy. Without a deployed
+   WorkspaceRegistry, private apps stay owner-only and this resolves empty. */
+async function loadWorkspaceMembers() {
+  const members = new Map();
+  try {
+    for (const e of await pgEvents('WorkspaceMemberInvited', { limit: 500, order: 'ascending' })) {
+      const j = e.parsedJson; if (!j?.app_id || !j.member) continue;
+      if (!members.has(j.app_id)) members.set(j.app_id, new Set());
+      members.get(j.app_id).add(String(j.member));
+    }
+    for (const e of await pgEvents('WorkspaceMemberRevoked', { limit: 500, order: 'ascending' })) {
+      const j = e.parsedJson; if (!j?.app_id || !j.member) continue;
+      members.get(j.app_id)?.delete(String(j.member));
+    }
+  } catch { /* workspace events may not exist until the v2 object is deployed */ }
+  pg.workspaces = members;
+  const me = STATE.wallet?.address || '';
+  for (const a of pg.gallery) {
+    const list = [...(members.get(a.id) || new Set())];
+    a.workspaceMembers = list;
+    a.workspaceCount = list.length;
+    a.allowed = !!me && (me === a.builder || list.includes(me));
+  }
 }
 
 function emptyGallery() {
@@ -757,6 +796,38 @@ export function renderGallery() {
         <a class="pg-verify" href="${explorerObject(a.id)}" target="_blank" rel="noreferrer" title="verifiable on-chain record">✓ on-chain</a>
       </div>
     </div>`).join('');
+  renderWorkspaceActions(grid, apps);
+}
+
+function renderWorkspaceActions(grid, apps) {
+  for (const a of apps) {
+    const card = grid.querySelector(`.pg-card[data-app="${a.id}"]`);
+    if (!card) continue;
+    if (a.private && a.workspaceCount) {
+      const meta = card.querySelector('.pg-card-meta');
+      const badge = document.createElement('span');
+      badge.className = 'pg-lineage';
+      badge.title = 'Seal-encrypted - builder and allowlisted collaborators can open it';
+      badge.textContent = `team private (${a.workspaceCount})`;
+      meta?.appendChild(badge);
+    }
+    if (!CFG.workspaceRegistry || !STATE.wallet || !a.private || STATE.wallet.address !== a.builder) continue;
+    const actions = card.querySelector('.pg-card-actions');
+    if (!actions) continue;
+    const verify = actions.querySelector('.pg-verify');
+    for (const [act, label, title] of [
+      ['invite-member', 'Invite', 'Allow a collaborator to decrypt this private app'],
+      ['revoke-member', 'Revoke', 'Revoke a collaborator from this private app'],
+    ]) {
+      const b = document.createElement('button');
+      b.className = 'btn-ghost pg-mini';
+      b.dataset.act = act;
+      b.dataset.app = a.id;
+      b.title = title;
+      b.textContent = label;
+      actions.insertBefore(b, verify || null);
+    }
+  }
 }
 
 /* viewer URL for a published app (Phase 3 viewer-route) */
@@ -780,8 +851,8 @@ function displayName(addr) {
 
 async function openLiveApp(id) {
   const app = appById(id); if (!app) return;
-  // Private apps are Seal-encrypted and owner-only — the public viewer can't decrypt
-  // (no wallet), so the builder opens them in-app where their wallet is connected.
+  // Private apps are Seal-encrypted; the public viewer has no wallet, so an
+  // authorized builder/member opens them in-app.
   if (app.private) { openPrivateApp(app); return; }
   // Only record a visit when it's gas-free (sponsor configured) — otherwise "Open" would
   // pop a wallet signature for a read-only action, which is jarring.
@@ -789,11 +860,15 @@ async function openLiveApp(id) {
   window.open(appViewerUrl(app), '_blank', 'noopener');
 }
 
-/* Open a private app: decrypt its archive (only the builder can) and render it in
-   a sandboxed iframe inside a modal. The public viewer shows an owner-only notice. */
+/* Open a private app: decrypt for the builder or an allowlisted workspace member
+   and render it in a sandboxed iframe inside a modal. */
 async function openPrivateApp(app) {
-  if (!STATE.wallet || STATE.wallet.address !== app.builder) {
-    toast('🔒 Private app — only the builder can open it', { kind: 'error' });
+  if (!STATE.wallet) {
+    toast('Private app - connect the builder or an allowlisted collaborator wallet', { kind: 'error' });
+    return;
+  }
+  if (!(STATE.wallet.address === app.builder || app.workspaceMembers?.includes(STATE.wallet.address))) {
+    toast('Private app - this wallet is not allowlisted for the workspace', { kind: 'error' });
     return;
   }
   toast('Decrypting with Seal (sign to unlock)…', { kind: 'info', timeout: 2500 });
@@ -805,7 +880,7 @@ async function openPrivateApp(app) {
     if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + csp);
     else html = '<!doctype html><head>' + csp + '</head>' + html;
     openModal({
-      title: `🔒 ${app.name} · private (owner-only)`,
+      title: `${app.name} - private`,
       wide: true,
       bodyHtml: `<iframe id="pgPrivFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" style="width:100%;height:68vh;border:0;background:#fff;border-radius:8px"></iframe>`,
       onMount(m) { m.querySelector('#pgPrivFrame').srcdoc = html; },
@@ -928,6 +1003,65 @@ async function setForkPrice(id) {
         pgCall(tx, 'playground::set_fork_price', [tx.object(CFG.forkRegistry), tx.object(id), tx.pure.u64(mist)]);
         const r = await signAndRun(tx, mist ? `Fork price set to ${sui} SUI` : 'Fork price cleared (free)');
         if (r) { closeModal(); loadGallery(); }
+      });
+    },
+  });
+}
+
+async function inviteWorkspaceMember(id) {
+  if (!STATE.wallet) { toast('Connect a wallet', { kind: 'error' }); return; }
+  if (!CFG.workspaceRegistry) { toast('Team-private workspace registry is not deployed on this network', { kind: 'error' }); return; }
+  const app = appById(id); if (!app) return;
+  if (STATE.wallet.address !== app.builder) { toast('Only the builder can invite workspace members', { kind: 'error' }); return; }
+  openModal({
+    title: `Invite collaborator - ${app.name}`,
+    bodyHtml: `
+      <label>Collaborator Sui address</label>
+      <input type="text" id="pgWorkspaceMember" placeholder="0x..." autocomplete="off">
+      <div class="pg-dim" style="margin-top:6px">Invited collaborators can decrypt this private app through the v2 Seal policy. The app owner stays unchanged.</div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="pgWorkspaceCancel">Cancel</button>
+        <button class="btn-primary" id="pgWorkspaceSave">Invite</button>
+      </div>`,
+    onMount(m) {
+      m.querySelector('#pgWorkspaceCancel').addEventListener('click', closeModal);
+      m.querySelector('#pgWorkspaceSave').addEventListener('click', async () => {
+        const member = m.querySelector('#pgWorkspaceMember').value.trim();
+        if (!isValidSuiAddress(member)) { toast('Enter a valid Sui address', { kind: 'error' }); return; }
+        const tx = new Transaction();
+        pgCall(tx, 'playground::invite_workspace_member', [tx.object(CFG.workspaceRegistry), tx.object(id), tx.pure.address(member)]);
+        const r = await signAndRun(tx, 'Workspace member invited');
+        if (r) { closeModal(); await loadGallery(); }
+      });
+    },
+  });
+}
+
+async function revokeWorkspaceMember(id) {
+  if (!STATE.wallet) { toast('Connect a wallet', { kind: 'error' }); return; }
+  if (!CFG.workspaceRegistry) { toast('Team-private workspace registry is not deployed on this network', { kind: 'error' }); return; }
+  const app = appById(id); if (!app) return;
+  if (STATE.wallet.address !== app.builder) { toast('Only the builder can revoke workspace members', { kind: 'error' }); return; }
+  const members = app.workspaceMembers || [];
+  openModal({
+    title: `Revoke collaborator - ${app.name}`,
+    bodyHtml: `
+      <label>Collaborator Sui address</label>
+      <input type="text" id="pgWorkspaceMember" placeholder="0x..." autocomplete="off" value="${escapeHtml(members[0] || '')}">
+      ${members.length ? `<div class="pg-dim" style="margin-top:6px">Current members: ${members.map((a) => `<span class="mono">${short(a)}</span>`).join(', ')}</div>` : '<div class="pg-dim" style="margin-top:6px">No indexed members yet. You can still paste an address to revoke.</div>'}
+      <div class="modal-actions">
+        <button class="btn-ghost" id="pgWorkspaceCancel">Cancel</button>
+        <button class="btn-primary" id="pgWorkspaceSave">Revoke</button>
+      </div>`,
+    onMount(m) {
+      m.querySelector('#pgWorkspaceCancel').addEventListener('click', closeModal);
+      m.querySelector('#pgWorkspaceSave').addEventListener('click', async () => {
+        const member = m.querySelector('#pgWorkspaceMember').value.trim();
+        if (!isValidSuiAddress(member)) { toast('Enter a valid Sui address', { kind: 'error' }); return; }
+        const tx = new Transaction();
+        pgCall(tx, 'playground::revoke_workspace_member', [tx.object(CFG.workspaceRegistry), tx.object(id), tx.pure.address(member)]);
+        const r = await signAndRun(tx, 'Workspace member revoked');
+        if (r) { closeModal(); await loadGallery(); }
       });
     },
   });
@@ -1459,6 +1593,8 @@ export function wirePlayground() {
       else if (t.dataset.act === 'remix') remixApp(id);
       else if (t.dataset.act === 'edit') editApp(id);
       else if (t.dataset.act === 'price') setForkPrice(id);
+      else if (t.dataset.act === 'invite-member') inviteWorkspaceMember(id);
+      else if (t.dataset.act === 'revoke-member') revokeWorkspaceMember(id);
       else if (t.dataset.act === 'renew') renewApp(id);
       else if (t.dataset.act === 'star') starApp(id);
       else if (t.dataset.act === 'tip') tipApp(id);

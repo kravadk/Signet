@@ -4,11 +4,12 @@ module signet::forge_tests;
 use std::string;
 use sui::test_scenario::{Self as ts, Scenario};
 use sui::coin;
+use sui::object::{Self, ID};
 use sui::sui::SUI;
 use signet::forge::{Self, ForgeRegistry, Repository, RepoOwnerCap, AgentCap};
 use signet::reputation::{Self, RepoReputation};
 use signet::pull_request::{Self as pr, PullRequest};
-use signet::release::{Self, Release};
+use signet::release::{Self, Release, ReleaseLink};
 use signet::issue::{Self, Issue};
 use signet::bounty::{Self, Bounty};
 
@@ -268,6 +269,31 @@ fun test_full_provenance_chain_and_reputation() {
         assert!(release::release_version(&rel) == s(b"v0.1.0"), 405);
         assert!(release::release_source(&rel) == s(b"blob_head"), 406);
         ts::return_shared(rel);
+    };
+
+    // Owner publishes a v2 release directly linked to the merged PR.
+    let pr_id: ID;
+    let repo_id: ID;
+    scen.next_tx(OWNER);
+    {
+        let mut repo = scen.take_shared<Repository>();
+        let pull = scen.take_shared<PullRequest>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        pr_id = object::id(&pull);
+        repo_id = object::id(&repo);
+        release::publish_release_v2(
+            &mut repo, &cap, &pull, s(b"v0.2.0"), s(b"blob_artifact_2"), s(b"blob_report_2"), scen.ctx(),
+        );
+        scen.return_to_sender(cap);
+        ts::return_shared(pull);
+        ts::return_shared(repo);
+    };
+    scen.next_tx(OWNER);
+    {
+        let link = scen.take_shared<ReleaseLink>();
+        assert!(release::link_repo(&link) == repo_id, 407);
+        assert!(release::link_merged_pr(&link) == pr_id, 408);
+        ts::return_shared(link);
     };
     scen.end();
 }
