@@ -12,8 +12,12 @@ import { formatAddress, MIST_PER_SUI, isValidSuiAddress, isValidSuiObjectId } fr
    Mainnet ids are filled in after `sui client publish` on mainnet. */
 const DEPLOYMENTS = {
   testnet: {
-    // Original package — existing repos/PRs/releases events stay under this id.
+    // Original package — existing repos/PRs/releases events + object types stay under
+    // this id (event/type filters use it). WRITES go to the latest upgrade below.
     packageId: '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1',
+    // Latest forge/bounty/reputation upgrade (v10) — forge-module WRITES target this so
+    // new functions (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability) resolve.
+    writePackageId: '0xe1e04781c3ada18ce5cdcaadbbc0fd7197b18b63400d49248240eaeff2a96bd5',
     mvrName: '@signet/forge',
     mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02',
@@ -43,6 +47,7 @@ const DEPLOYMENTS = {
     flagRegistry: '0x48068f761d6d05e74a069393852ff1c481481c5171c2068ccad060b95268a046',
     nameRegistry: '0xf802954a95dab72f878175aa2340ca7be25055210f44be5f51af15b0d8b62f10',
     treasury: '0x9062ed0b2d6506d9108632bead5a6a466320a85bf51359b00611c94fd89ad921',
+    reliabilityLedger: '0x15fdb90609f55671830f285b2595463503b2e3e5310fa3d9f2789770b14c1973',
     forkRegistry: '0xc774e8caffee5289079454422c2adb7ed425e58e1e657e8fcc0534971d753909',
     privacyRegistry: '0x1c33121003f42314aa424cebc63c41eab346744eef0c871f98c73d24f8ecd20f',
     // workspaceRegistry: '<create_workspace_registry object id after team-private v2 deploy>',

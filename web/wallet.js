@@ -340,7 +340,7 @@ export async function walrusPut(data) {
   return j.newlyCreated?.blobObject?.blobId || j.alreadyCertified?.blobId;
 }
 
-export const pkgCall = (tx, fn, args) => tx.moveCall({ target: `${CFG.packageId}::${fn}`, arguments: args });
+export const pkgCall = (tx, fn, args) => tx.moveCall({ target: `${CFG.writePackageId || CFG.packageId}::${fn}`, arguments: args });
 
 /* ----- permissionless ----- */
 export async function actOpenIssue(repoId) {
@@ -397,7 +397,7 @@ export async function actOpenDispute(bountyId) {
     setBusy(true);
     try {
       const tx = new Transaction();
-      pkgCall(tx, 'bounty::open_dispute', [tx.object(bountyId), tx.pure.string(v.reason || 'disputed')]);
+      pkgCall(tx, 'bounty::open_dispute', [tx.object(bountyId), tx.pure.string(v.reason || 'disputed'), tx.object(CFG.reliabilityLedger)]);
       const r = await signAndRun(tx, 'Dispute opened'); if (r) closeModal();
     } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
   });

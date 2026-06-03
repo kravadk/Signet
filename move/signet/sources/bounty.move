@@ -14,7 +14,7 @@ use sui::sui::SUI;
 use sui::event;
 use sui::clock::{Self, Clock};
 use signet::forge::{Self, Repository, RepoOwnerCap};
-use signet::reputation::{Self, RepoReputation};
+use signet::reputation::{Self, RepoReputation, ReliabilityLedger};
 use signet::playground::{Self, Treasury};
 
 // ===== Errors =====
@@ -275,6 +275,7 @@ public fun cancel_expired(
     bounty: &mut Bounty,
     terms: &BountyTerms,
     clock: &Clock,
+    reliability: &mut ReliabilityLedger,
     ctx: &mut TxContext,
 ) {
     assert!(bounty.funder == ctx.sender(), ENotFunder);
@@ -282,6 +283,8 @@ public fun cancel_expired(
     assert!(bounty.status == STATUS_CLAIMED, ENotClaimed);
     assert!(terms.deadline_ms > 0, ENoDeadline);
     assert!(clock::timestamp_ms(clock) > terms.deadline_ms, EDeadlineNotPassed);
+    // The claimant who missed the deadline accrues an expired signal.
+    reputation::note_expired(reliability, *option::borrow(&bounty.claimant));
     let total = balance::value(&bounty.escrow);
     let refund = coin::take(&mut bounty.escrow, total, ctx);
     transfer::public_transfer(refund, bounty.funder);
@@ -317,11 +320,18 @@ public struct DisputeResolved has copy, drop { dispute_id: ID, bounty_id: ID, pa
 /// Open a dispute on a CLAIMED bounty. Only the funder or the current claimant
 /// may open one. Moves the bounty into DISPUTED so it can't be approved/cancelled
 /// out from under arbitration.
-public fun open_dispute(bounty: &mut Bounty, reason: String, ctx: &mut TxContext) {
+public fun open_dispute(
+    bounty: &mut Bounty,
+    reason: String,
+    reliability: &mut ReliabilityLedger,
+    ctx: &mut TxContext,
+) {
     assert!(bounty.status == STATUS_CLAIMED, ENotClaimed);
     let sender = ctx.sender();
     let is_party = sender == bounty.funder || option::contains(&bounty.claimant, &sender);
     assert!(is_party, ENotParty);
+    // The contested worker (claimant) accrues a disputed signal regardless of who opened.
+    reputation::note_disputed(reliability, *option::borrow(&bounty.claimant));
     bounty.status = STATUS_DISPUTED;
     let dispute = BountyDispute {
         id: object::new(ctx),

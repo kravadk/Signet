@@ -8,7 +8,7 @@ use sui::clock;
 use sui::object::{Self, ID};
 use sui::sui::SUI;
 use signet::forge::{Self, ForgeRegistry, Repository, RepoOwnerCap, AgentCap};
-use signet::reputation::{Self, RepoReputation};
+use signet::reputation::{Self, RepoReputation, ReliabilityLedger};
 use signet::pull_request::{Self as pr, PullRequest};
 use signet::release::{Self, Release, ReleaseLink};
 use signet::issue::{Self, Issue};
@@ -38,6 +38,10 @@ fun setup(): Scenario {
             scen.ctx(),
         );
         ts::return_shared(registry);
+    };
+    scen.next_tx(OWNER);
+    {
+        reputation::create_reliability_ledger(scen.ctx());
     };
     scen
 }
@@ -460,8 +464,11 @@ fun test_bounty_dispute_partial_payout() {
     scen.next_tx(FUNDER);
     {
         let mut b = scen.take_shared<Bounty>();
-        bounty::open_dispute(&mut b, s(b"work incomplete"), scen.ctx());
+        let mut ledger = scen.take_shared<ReliabilityLedger>();
+        bounty::open_dispute(&mut b, s(b"work incomplete"), &mut ledger, scen.ctx());
         assert!(bounty::bounty_status(&b) == bounty::status_disputed(), 720);
+        assert!(reputation::rel_disputed(&reputation::reliability_of(&ledger, AGENT)) == 1, 725);
+        ts::return_shared(ledger);
         ts::return_shared(b);
     };
     // Owner arbitrates: 60% to claimant.
@@ -513,7 +520,9 @@ fun test_bounty_dispute_only_party() {
     scen.next_tx(OWNER);
     {
         let mut b = scen.take_shared<Bounty>();
-        bounty::open_dispute(&mut b, s(b"meddling"), scen.ctx());
+        let mut ledger = scen.take_shared<ReliabilityLedger>();
+        bounty::open_dispute(&mut b, s(b"meddling"), &mut ledger, scen.ctx());
+        ts::return_shared(ledger);
         ts::return_shared(b);
     };
     scen.end();
@@ -592,11 +601,14 @@ fun test_bounty_v2_deadline_cancel() {
     {
         let mut b = scen.take_shared<Bounty>();
         let terms = scen.take_shared<BountyTerms>();
+        let mut ledger = scen.take_shared<ReliabilityLedger>();
         let mut clk = clock::create_for_testing(scen.ctx());
         clock::set_for_testing(&mut clk, 2000);
-        bounty::cancel_expired(&mut b, &terms, &clk, scen.ctx());
+        bounty::cancel_expired(&mut b, &terms, &clk, &mut ledger, scen.ctx());
         assert!(bounty::bounty_status(&b) == bounty::status_cancelled(), 740);
+        assert!(reputation::rel_expired(&reputation::reliability_of(&ledger, AGENT)) == 1, 742);
         clock::destroy_for_testing(clk);
+        ts::return_shared(ledger);
         ts::return_shared(terms);
         ts::return_shared(b);
     };

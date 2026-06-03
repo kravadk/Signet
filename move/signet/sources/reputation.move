@@ -51,6 +51,54 @@ public struct AgentProfile has store, copy, drop {
     last_epoch: u64,
 }
 
+// ===== Reliability / SLA (v2, upgrade-safe global ledger) =====
+//
+// The deployed `AgentProfile` layout can't be widened in an upgrade, so SLA
+// signals (disputed / expired work) live in a separate global shared ledger,
+// bumped by sibling modules (bounty) through `public(package)` hooks.
+
+/// One agent's reliability tallies (negative-signal counters).
+public struct AgentReliability has store, copy, drop {
+    disputed: u64,  // claimed bounties that ended up disputed
+    expired: u64,   // claimed bounties reclaimed by the funder past the deadline
+}
+
+/// Global reliability ledger (one shared object, created once after the upgrade).
+public struct ReliabilityLedger has key {
+    id: UID,
+    records: Table<address, AgentReliability>,
+}
+
+/// Create the shared reliability ledger. Call once after the package upgrade.
+public fun create_reliability_ledger(ctx: &mut TxContext) {
+    transfer::share_object(ReliabilityLedger { id: object::new(ctx), records: table::new(ctx) });
+}
+
+fun ensure_reliability(ledger: &mut ReliabilityLedger, agent: address) {
+    if (!table::contains(&ledger.records, agent)) {
+        table::add(&mut ledger.records, agent, AgentReliability { disputed: 0, expired: 0 });
+    };
+}
+
+public(package) fun note_disputed(ledger: &mut ReliabilityLedger, agent: address) {
+    ensure_reliability(ledger, agent);
+    let r = table::borrow_mut(&mut ledger.records, agent);
+    r.disputed = r.disputed + 1;
+}
+
+public(package) fun note_expired(ledger: &mut ReliabilityLedger, agent: address) {
+    ensure_reliability(ledger, agent);
+    let r = table::borrow_mut(&mut ledger.records, agent);
+    r.expired = r.expired + 1;
+}
+
+public fun reliability_of(ledger: &ReliabilityLedger, agent: address): AgentReliability {
+    if (table::contains(&ledger.records, agent)) { *table::borrow(&ledger.records, agent) }
+    else { AgentReliability { disputed: 0, expired: 0 } }
+}
+public fun rel_disputed(r: &AgentReliability): u64 { r.disputed }
+public fun rel_expired(r: &AgentReliability): u64 { r.expired }
+
 // ===== Events =====
 
 public struct ReputationUpdated has copy, drop {
