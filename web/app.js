@@ -432,14 +432,22 @@ function renderVerifyResult(host, result) {
     ? '<h3 class="detail-h3">Release graph</h3>' +
       '<div class="prov-chain">' +
         '<div class="prov-node g"><div class="prov-label">Repo</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.repoId) + '">' + short(r.repoId) + '</a></div>' +
-        '<span class="prov-arrow">в†’</span>' +
+        '<span class="prov-arrow">→</span>' +
         '<div class="prov-node b"><div class="prov-label">Merged PR</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.mergedPrId) + '">' + short(r.mergedPrId) + '</a></div>' +
-        '<span class="prov-arrow">в†’</span>' +
+        '<span class="prov-arrow">→</span>' +
         '<div class="prov-node v"><div class="prov-label">Reviews / CI</div><span class="prov-blob mono">' + (linkedPr ? ((linkedPr.reviewRefs?.length || 0) + ' report(s)') : 'not loaded') + '</span></div>' +
-        '<span class="prov-arrow">в†’</span>' +
+        '<span class="prov-arrow">→</span>' +
         '<div class="prov-node release"><div class="prov-label">Release</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.id) + '">' + short(r.id) + '</a></div>' +
       '</div>'
-    : '<div class="cmd-note" style="margin:8px 0 14px">Legacy release: no direct PR link; verification falls back to matching merged PR head snapshots.</div>';
+    : '<h3 class="detail-h3">Release graph</h3>' +
+      '<div class="prov-chain">' +
+        '<div class="prov-node g"><div class="prov-label">Repo</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.repoId || '') + '">' + short(r.repoId || '') + '</a></div>' +
+        '<span class="prov-arrow">→</span>' +
+        '<div class="prov-node b"><div class="prov-label">Source snapshot</div><span class="prov-blob mono">' + short(r.sourceSnapshot || '') + '</span></div>' +
+        '<span class="prov-arrow">→</span>' +
+        '<div class="prov-node release"><div class="prov-label">Release</div><a class="prov-blob link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.id || result.releaseId) + '">' + short(r.id || result.releaseId) + '</a></div>' +
+      '</div>' +
+      '<div class="cmd-note" style="margin:8px 0 14px">Legacy release: no direct PR link; verification falls back to matching merged PR head snapshots.</div>';
   host.innerHTML =
     '<div class="verify-result">' +
       '<div class="verify-top">' + badge + '</div>' +
