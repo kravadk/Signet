@@ -787,6 +787,7 @@ export function renderGallery() {
       <div class="pg-card-actions">
         <button class="btn-primary pg-mini" data-act="open" data-app="${a.id}">Open ↗</button>
         <button class="btn-ghost pg-mini" data-act="share" data-app="${a.id}" title="copy a shareable, verifiable link to this app">🔗 Share</button>
+        <button class="btn-ghost pg-mini" data-act="history" data-app="${a.id}" title="version history (on-chain AppUpdated events)">🕘 History</button>
         <button class="btn-ghost pg-mini" data-act="remix" data-app="${a.id}" title="${a.forkPrice ? `fork costs ${suiAmount(a.forkPrice)} SUI (paid to the builder)` : 'remix this app'}">${a.forkPrice ? `Fork ◈ ${suiAmount(a.forkPrice)}` : 'Remix'}</button>
         <button class="btn-ghost pg-mini" data-act="star" data-app="${a.id}">★</button>
         <button class="btn-ghost pg-mini" data-act="tip" data-app="${a.id}">◈ Tip</button>
@@ -846,6 +847,26 @@ export function appViewerUrl(app) {
 }
 
 function appById(id) { return pg.gallery.find((a) => a.id === id); }
+
+/** Version history for an app: v1 = publish, each AppUpdated event = a new version. */
+async function showAppHistory(id) {
+  const app = appById(id);
+  openModal({ title: `Version history${app ? ' — ' + escapeHtml(app.name) : ''}`, bodyHtml: '<div id="pgHist" class="verify-steps">loading…</div>' });
+  try {
+    const events = await pgEvents('AppUpdated', { limit: 500, order: 'ascending' });
+    const mine = events.filter((e) => e.parsedJson?.app_id === id);
+    const rows = [{ v: 1, label: 'published', treeHash: app?.treeHash || '', ts: app?.createdAt || 0 }];
+    mine.forEach((e, i) => rows.push({ v: i + 2, label: 'updated', treeHash: e.parsedJson?.tree_hash || '', ts: Number(e.parsedJson?.updated_at_ms) || 0 }));
+    const host = $('pgHist'); if (!host) return;
+    host.innerHTML = rows.reverse().map((r) =>
+      '<div class="vstep ok"><span class="vmark">v' + r.v + '</span>' +
+      '<span class="vlabel">' + r.label + (r.ts ? ' · ' + new Date(r.ts).toLocaleString() : '') + '</span>' +
+      '<span class="vdetail mono">' + escapeHtml(short(r.treeHash || '—')) + '</span></div>').join('') +
+      (mine.length ? '' : '<p class="pg-dim">No updates yet — this is the original version.</p>');
+  } catch (e) {
+    const host = $('pgHist'); if (host) host.innerHTML = '<p class="pg-warn">History unavailable: ' + escapeHtml(e.message || String(e)) + '</p>';
+  }
+}
 
 /** Prefer an on-chain claimed handle (@name) over a SuiNS/short address. */
 function displayName(addr) {
@@ -1593,6 +1614,7 @@ export function wirePlayground() {
     else if (t.dataset?.act) {
       const id = t.dataset.app;
       if (t.dataset.act === 'open') openLiveApp(id);
+      else if (t.dataset.act === 'history') showAppHistory(id);
       else if (t.dataset.act === 'share') shareApp(id);
       else if (t.dataset.act === 'remix') remixApp(id);
       else if (t.dataset.act === 'edit') editApp(id);
