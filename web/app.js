@@ -1379,11 +1379,38 @@ function showAgentDetail(addr) {
 }
 
 /* ---------- Package trust view ---------- */
+/* Known Sui framework package addresses (trusted by definition). */
+const FRAMEWORK_PKGS = { '0x1': 'MoveStdlib', '0x2': 'Sui framework', '0x3': 'SuiSystem', '0xb': 'Bridge' };
+function normPkgAddr(a) { const h = String(a || '').replace(/^0x/, '').replace(/^0+/, ''); return '0x' + (h || '0'); }
+
+/**
+ * Read a package's real on-chain dependencies by walking its normalized Move
+ * modules and collecting every distinct package address referenced in struct
+ * fields and function signatures. Framework packages are flagged trusted.
+ */
+async function loadPackageDependencies(packageId) {
+  const mods = await withTimeout(sui.getNormalizedMoveModulesByPackage({ package: packageId }), 12000);
+  const self = normPkgAddr(packageId);
+  const addrs = new Set();
+  const visit = (t) => {
+    if (!t || typeof t !== 'object') return;
+    if (t.Struct) { addrs.add(normPkgAddr(t.Struct.address)); (t.Struct.typeArguments || []).forEach(visit); }
+    else if (t.Reference) visit(t.Reference);
+    else if (t.MutableReference) visit(t.MutableReference);
+    else if (t.Vector) visit(t.Vector);
+  };
+  for (const mod of Object.values(mods || {})) {
+    for (const s of Object.values(mod.structs || {})) (s.fields || []).forEach((f) => visit(f.type));
+    for (const fn of Object.values(mod.exposedFunctions || {})) { (fn.parameters || []).forEach(visit); (fn.return || []).forEach(visit); }
+  }
+  addrs.delete(self);
+  return [...addrs].map((a) => ({ addr: a, framework: !!FRAMEWORK_PKGS[a], name: FRAMEWORK_PKGS[a] || null }));
+}
+
 function renderPackagesView() {
   const el = $('packageTrust');
   if (!el) return;
   const maintainers = [...new Set(STATE.repos.map((r) => r.owner).filter(Boolean))];
-  const deps = ['MoveStdlib', 'Sui framework'];
   const releaseRows = STATE.releases.slice(0, 8).map((r) =>
     '<div class="vstep ok">' +
       '<span class="vmark">R</span>' +
@@ -1403,10 +1430,18 @@ function renderPackagesView() {
           '<div><span class="k">Toolchain</span><span class="mono">Sui ' + escapeHtml(CFG.toolchainVersion || 'unknown') + '</span></div>' +
         '</div>' +
       '</section>' +
-      '<section class="info-card"><h3>Dependencies</h3><div class="agent-market-row">' + deps.map((d) => '<span class="market-pill">' + escapeHtml(d) + '</span>').join('') + '</div><p>Move.toml has no third-party app dependencies; runtime trust comes from the Sui framework and deployed Signet objects.</p></section>' +
+      '<section class="info-card"><h3>Dependencies</h3><div class="agent-market-row" id="pkgDeps"><span class="market-pill">resolving on-chain…</span></div><p>Package dependencies read live from the package\'s normalized modules; framework packages (0x1/0x2/0x3) are trusted by definition.</p></section>' +
       '<section class="info-card"><h3>Maintainers</h3>' + (maintainers.length ? maintainers.map((m) => '<a class="link mono maint-row" target="_blank" rel="noreferrer" href="' + explorerAddress(m) + '">' + escapeHtml(nameOrShort(m)) + '</a>').join('') : '<p>No repository maintainers loaded yet.</p>') + '</section>' +
     '</div>' +
     '<h3 class="detail-h3">Verified releases</h3><div class="verify-steps" id="pkgReleaseChecks">' + releaseRows + '</div>';
+  // Resolve real on-chain dependencies (async; fills the placeholder).
+  loadPackageDependencies(CFG.packageId).then((deps) => {
+    const host = $('pkgDeps'); if (!host) return;
+    if (!deps.length) { host.innerHTML = '<span class="market-pill">no external package deps</span>'; return; }
+    host.innerHTML = deps.map((d) => d.framework
+      ? '<span class="market-pill">' + escapeHtml(d.name) + ' · trusted</span>'
+      : '<a class="market-pill link mono" target="_blank" rel="noreferrer" href="' + explorerObject(d.addr) + '">' + short(d.addr, 8, 6) + '</a>').join('');
+  }).catch(() => { const host = $('pkgDeps'); if (host) host.innerHTML = '<span class="market-pill">deps unavailable (RPC)</span>'; });
   if (!STATE.releases.length) {
     const risk = $('pkgRisk'); if (risk) { risk.textContent = 'partial'; risk.className = 'tier-badge tier-contributor'; }
     return;

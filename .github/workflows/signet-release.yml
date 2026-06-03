@@ -231,9 +231,19 @@ jobs:
 
       - name: Emit GitHub check outputs
         id: check
+        env:
+          SIGNET_SLSA_OUT: signet-slsa-${{ env.SIGNET_RELEASE_ID }}.json
         run: |
           node --import tsx app/scripts/github-signet-check.mjs \
             --network "$FORGE_NETWORK" \
             --release "$SIGNET_RELEASE_ID" \
             --pr "$SIGNET_MERGED_PR_ID" \
             --snapshot "${{ steps.snapshot.outputs.manifest_blob }}"
+
+      - name: Upload SLSA provenance statement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signet-slsa-provenance
+          path: signet-slsa-*.json
+          if-no-files-found: ignore

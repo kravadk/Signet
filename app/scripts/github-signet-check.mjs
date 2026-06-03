@@ -7,10 +7,11 @@
  * tree hash, release id, PR id, verification level, and reverify anchors.
  */
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 import { verifyRelease } from "../src/lib/actions.ts";
 import { fetchManifest, getRelease } from "../src/lib/forge-read.ts";
+import { loadDeployment } from "../src/lib/sui.ts";
 
 function arg(name, fallback = "") {
   const i = process.argv.indexOf(name);
@@ -100,5 +101,37 @@ const summary = [
 
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 console.log(JSON.stringify(anchors, null, 2));
+
+// Auto-export an in-toto/SLSA v1 provenance statement when a path is given
+// (the release workflow sets SIGNET_SLSA_OUT and uploads it as an artifact).
+const slsaOut = arg("--slsa-out", process.env.SIGNET_SLSA_OUT ?? "");
+if (slsaOut) {
+  let packageId = "";
+  try { packageId = (await loadDeployment(network))?.packageId ?? ""; } catch { /* best-effort */ }
+  const slsa = {
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [{ name: rel?.buildArtifact || releaseId, digest: { walrusBlobId: rel?.buildArtifact || "" } }],
+    predicateType: "https://slsa.dev/provenance/v1",
+    predicate: {
+      buildDefinition: {
+        buildType: "https://signet.dev/release/v2",
+        externalParameters: { network, packageId, repoId: anchors.repoId, releaseId, mergedPrId: anchors.mergedPrId, version: rel?.version ?? "" },
+        resolvedDependencies: [
+          { uri: packageId ? `sui:package:${packageId}` : "sui:package:unknown", digest: { suiObjectId: packageId } },
+          { uri: `walrus:blob:${anchors.sourceSnapshot}`, digest: { treeHash: anchors.treeHash } },
+          { uri: `walrus:blob:${anchors.buildArtifact}` },
+          { uri: `walrus:blob:${anchors.testReport}` },
+        ],
+      },
+      runDetails: {
+        builder: { id: "signet-github-action" },
+        metadata: { invocationId: releaseId, verificationLevel: verify.levelLabel, verified: verify.pass },
+      },
+    },
+  };
+  writeFileSync(slsaOut, JSON.stringify(slsa, null, 2));
+  writeOutput("slsa_statement", slsaOut);
+  console.error(`[signet] SLSA statement written to ${slsaOut}`);
+}
 
 if (!verify.pass) process.exit(2);
