@@ -1,0 +1,86 @@
+name: "Signet Release"
+description: >-
+  Snapshot the checked-out repo to Walrus, publish/verify an on-chain Signet
+  release, and emit a provenance check (tree hash, release id, SLSA statement).
+  Reusable from any repo via the published Signet CLI.
+
+# Usage (from an external repo):
+#
+#   - uses: actions/checkout@v4
+#   - uses: kravadk/signet/.github/actions/signet-release@main
+#     with:
+#       network: testnet
+#       name: my-repo
+#       branch: main
+#       deploy-key: ${{ secrets.SIGNET_DEPLOY_KEY }}   # testnet, funded SUI+WAL
+#
+# Runs the published @signet/cli via npx. Testnet-oriented; mainnet releases
+# should stay manual until the upgrade key is rotated.
+
+inputs:
+  network:
+    description: "Sui network (testnet | mainnet)"
+    required: false
+    default: testnet
+  name:
+    description: "Signet repository name (globally unique)"
+    required: true
+  branch:
+    description: "Branch to snapshot"
+    required: false
+    default: main
+  deploy-key:
+    description: "Funded Sui private key (suiprivkey1…) used to sign. Pass a Secret."
+    required: true
+  dir:
+    description: "Directory to snapshot"
+    required: false
+    default: "."
+  cli-version:
+    description: "@signet/cli version spec for npx"
+    required: false
+    default: latest
+
+outputs:
+  release-id:
+    description: "Published release object id"
+    value: ${{ steps.release.outputs.release_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Snapshot + release + verify
+      id: release
+      shell: bash
+      env:
+        FORGE_NETWORK: ${{ inputs.network }}
+        FORGE_OWNER_KEY: ${{ inputs.deploy-key }}
+        SIGNET_SLSA_OUT: signet-slsa.json
+      run: |
+        set -euo pipefail
+        CLI="npx -y @signet/cli@${{ inputs.cli-version }}"
+        # Create the repo on first run; push a new snapshot on subsequent runs.
+        if [ ! -f ./.signet ]; then
+          $CLI init --name "${{ inputs.name }}" --branch "${{ inputs.branch }}" --dir "${{ inputs.dir }}"
+        else
+          $CLI push-snapshot --dir "${{ inputs.dir }}"
+        fi
+        # Publish a release and parse the printed object id (0x + 64 hex).
+        out="$($CLI release --dir "${{ inputs.dir }}")"
+        echo "$out"
+        release_id="$(printf '%s' "$out" | grep -oE '0x[0-9a-f]{64}' | head -1 || true)"
+        echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+        if [ -n "$release_id" ]; then $CLI verify --release "$release_id"; fi
+
+    - name: Upload SLSA provenance
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: signet-slsa-provenance
+        path: signet-slsa*.json
+        if-no-files-found: ignore

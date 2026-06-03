@@ -142,6 +142,50 @@ program
   });
 
 program
+  .command("import")
+  .description("Import a GitHub repo: clone -> snapshot -> Walrus -> on-chain Repository")
+  .requiredOption("-u, --url <git-url>", "GitHub repo URL (https or git)")
+  .option("-b, --branch <branch>", "branch to import", "main")
+  .option("-n, --name <name>", "repository name (defaults to the GitHub repo name)")
+  .action(async (opts) => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join, basename } = await import("node:path");
+    const name = opts.name || basename(String(opts.url).replace(/\.git$/, ""));
+    const tmp = mkdtempSync(join(tmpdir(), "signet-import-"));
+    try {
+      console.log(`cloning ${opts.url} (branch ${opts.branch}) ...`);
+      execFileSync("git", ["clone", "--depth", "1", "--branch", opts.branch, String(opts.url), tmp], { stdio: "inherit" });
+      // Drop the VCS metadata so only working-tree content is snapshotted.
+      rmSync(join(tmp, ".git"), { recursive: true, force: true });
+      const ctx = makeContext(NET);
+      console.log(`signer: ${ctx.address}`);
+      console.log(`snapshotting clone ...`);
+      const { archiveBlob, manifestBlob, manifest } = await uploadSnapshot(tmp, name, opts.branch, null);
+      console.log(`  archive blob:  ${archiveBlob}`);
+      console.log(`  manifest blob: ${manifestBlob}  (${manifest.files.length} files)`);
+      console.log("creating on-chain Repository ...");
+      const res = await createRepo(ctx, { name, defaultBranch: opts.branch, initialSnapshot: manifestBlob });
+      const repoId = createdOfType(res, "::forge::Repository")[0];
+      const ownerCapId = createdOfType(res, "::forge::RepoOwnerCap")[0];
+      const reputationId = createdOfType(res, "::reputation::RepoReputation")[0];
+      // Persist state in the CWD so follow-up commands (push-snapshot/release) work.
+      saveState(".", {
+        network: NET, name, branch: opts.branch, repoId, ownerCapId, reputationId,
+        currentSnapshot: manifest.treeHash, currentManifestBlob: manifestBlob,
+      });
+      console.log(`\n✓ imported ${opts.url} -> repo ${repoId}`);
+      console.log(`  tx:       ${res.digest}`);
+      console.log(`  OwnerCap: ${ownerCapId}`);
+      console.log(`  manifest: ${blobUrl(manifestBlob)}`);
+      console.log(`  state saved to ./.signet — run forge push-snapshot / release next`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+program
   .command("push-snapshot")
   .description("Upload a new snapshot of the dir to Walrus (does not move the ref)")
   .option("-d, --dir <dir>", "directory to snapshot", ".")
