@@ -11,7 +11,7 @@ use signet::reputation::{Self, RepoReputation};
 use signet::pull_request::{Self as pr, PullRequest};
 use signet::release::{Self, Release, ReleaseLink};
 use signet::issue::{Self, Issue};
-use signet::bounty::{Self, Bounty};
+use signet::bounty::{Self, Bounty, BountyDispute};
 
 const OWNER: address = @0xA;
 const AGENT: address = @0xB;
@@ -429,6 +429,90 @@ fun test_bounty_cancel_refunds() {
         let refund = scen.take_from_sender<coin::Coin<SUI>>();
         assert!(coin::value(&refund) == 500, 711);
         scen.return_to_sender(refund);
+    };
+    scen.end();
+}
+
+#[test]
+fun test_bounty_dispute_partial_payout() {
+    let mut scen = setup();
+    // Funder posts 1000 MIST.
+    scen.next_tx(FUNDER);
+    {
+        let repo = scen.take_shared<Repository>();
+        let payment = coin::mint_for_testing<SUI>(1000, scen.ctx());
+        bounty::post_bounty(&repo, s(b"contested"), payment, 0, scen.ctx());
+        ts::return_shared(repo);
+    };
+    // Agent claims + submits.
+    scen.next_tx(AGENT);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        bounty::submit_bounty(&mut b, s(b"pr_x"), scen.ctx());
+        ts::return_shared(rep);
+        ts::return_shared(b);
+    };
+    // Funder opens a dispute -> DISPUTED.
+    scen.next_tx(FUNDER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        bounty::open_dispute(&mut b, s(b"work incomplete"), scen.ctx());
+        assert!(bounty::bounty_status(&b) == bounty::status_disputed(), 720);
+        ts::return_shared(b);
+    };
+    // Owner arbitrates: 60% to claimant.
+    scen.next_tx(OWNER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let mut d = scen.take_shared<BountyDispute>();
+        let repo = scen.take_shared<Repository>();
+        let cap = scen.take_from_sender<RepoOwnerCap>();
+        bounty::resolve_dispute(&mut b, &mut d, &repo, &cap, 6000, scen.ctx());
+        assert!(bounty::bounty_status(&b) == bounty::status_paid(), 721);
+        assert!(bounty::dispute_resolved(&d), 722);
+        assert!(bounty::bounty_escrow_value(&b) == 0, 723);
+        scen.return_to_sender(cap);
+        ts::return_shared(repo);
+        ts::return_shared(d);
+        ts::return_shared(b);
+    };
+    // Claimant received 585 (60% of 1000 = 600 award, minus 2.5% fee = 15).
+    scen.next_tx(AGENT);
+    {
+        let paid = scen.take_from_sender<coin::Coin<SUI>>();
+        assert!(coin::value(&paid) == 585, 724);
+        scen.return_to_sender(paid);
+    };
+    scen.end();
+}
+
+#[test]
+#[expected_failure(abort_code = signet::bounty::ENotParty)]
+fun test_bounty_dispute_only_party() {
+    let mut scen = setup();
+    scen.next_tx(FUNDER);
+    {
+        let repo = scen.take_shared<Repository>();
+        let payment = coin::mint_for_testing<SUI>(100, scen.ctx());
+        bounty::post_bounty(&repo, s(b"b"), payment, 0, scen.ctx());
+        ts::return_shared(repo);
+    };
+    scen.next_tx(AGENT);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        let rep = scen.take_shared<RepoReputation>();
+        bounty::claim_bounty(&mut b, &rep, scen.ctx());
+        ts::return_shared(rep);
+        ts::return_shared(b);
+    };
+    // OWNER is neither funder nor claimant — cannot open a dispute.
+    scen.next_tx(OWNER);
+    {
+        let mut b = scen.take_shared<Bounty>();
+        bounty::open_dispute(&mut b, s(b"meddling"), scen.ctx());
+        ts::return_shared(b);
     };
     scen.end();
 }
