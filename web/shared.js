@@ -187,7 +187,7 @@ export const PR_STATUS = ['open', 'merged', 'closed'];
 export const prStatusLabel = (s) => PR_STATUS[s] ?? 'unknown';
 export const ISSUE_STATUS = ['open', 'closed'];
 export const issueStatusLabel = (s) => ISSUE_STATUS[s] ?? 'unknown';
-export const BOUNTY_STATUS = ['open', 'claimed', 'paid', 'cancelled'];
+export const BOUNTY_STATUS = ['open', 'claimed', 'paid', 'cancelled', 'disputed'];
 export const bountyStatusLabel = (s) => BOUNTY_STATUS[s] ?? 'unknown';
 
 /* ---------- DOM + object helpers ---------- */

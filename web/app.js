@@ -17,7 +17,7 @@ import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeleton
 import {
   wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor,
   resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr,
-  actVouch, actSetApprovals,
+  actVouch, actSetApprovals, actOpenDispute, actResolveDispute,
 } from './wallet.js';
 import { wirePlayground, renderPlaygroundView, loadGallery } from './playground.js';
 import { beginZkLogin, completeZkLoginFromRedirect, restoreZkLogin, zkConfigured } from './zklogin.js';
@@ -1181,10 +1181,12 @@ function agentSummary(addr) {
   const merged = prs.filter((p) => p.status === 1).length;
   const totalWork = opened + reviews.length + claimed.length;
   const completed = merged + reviews.length + paid.length;
+  // Disputed work is an SLA signal: bounties this agent claimed that are in dispute.
+  const disputed = bounties.filter((b) => b.status === 4).length;
   const reliability = totalWork ? completed / totalWork : 0;
   const recentTs = Math.max(0, ...prs.map((p) => p.ts || 0), ...reviews.map((r) => r.ts || 0), ...claimed.map((e) => e.ts || 0), ...paid.map((e) => e.ts || 0), ...vouches.map((e) => e.ts || 0));
   const repoIds = new Set([...prs.map((p) => p.repoId), ...reviews.map((r) => STATE.prs.find((p) => p.id === r.prId)?.repoId), ...bounties.map((b) => b.repoId)].filter(Boolean));
-  return { prs, reviews, vouches, claimed, paid, bounties, opened, merged, totalWork, completed, reliability, recentTs, repoIds };
+  return { prs, reviews, vouches, claimed, paid, bounties, opened, merged, totalWork, completed, reliability, disputed, recentTs, repoIds };
 }
 
 function filteredAgents() {
@@ -1257,6 +1259,7 @@ function renderAgentsView() {
       '<div class="agent-market-row">' +
         '<span class="market-pill">scope ' + escapeHtml(cap ? scopeChips(cap.scopes).join(', ') || 'none' : 'none') + '</span>' +
         '<span class="market-pill">reliability ' + relPct + '%</span>' +
+        (summary.disputed > 0 ? '<span class="market-pill" data-tip="Claimed bounties currently in dispute">⚖ ' + summary.disputed + ' disputed</span>' : '') +
         '<span class="market-pill">repos ' + summary.repoIds.size + '</span>' +
         '<span class="market-pill">last ' + escapeHtml(last) + '</span>' +
       '</div>' +
@@ -1526,8 +1529,30 @@ function renderBountiesView() {
         '<div><span class="k">Repo</span><span class="mono">' + escapeHtml(STATE.repoNameById.get(b.repoId) || short(b.repoId)) + '</span></div>' +
         '<div><span class="k">Escrow</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(b.id) + '">' + short(b.id) + '</a></div>' +
         (b.minScore > 0 ? '<div><span class="k">Requires</span><span class="lock-tag" data-tip="Only agents whose trust score ≥ this can claim">🔒 score ≥ ' + b.minScore + '</span></div>' : '') +
-      '</div></div>';
+      '</div>' + bountyActions(b) + '</div>';
   }).join('');
+  el.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.dataset.bounty;
+    if (btn.dataset.act === 'dispute') actOpenDispute(id);
+    else if (btn.dataset.act === 'resolve') actResolveDispute(id, btn.dataset.repo, btn.dataset.cap);
+  }));
+}
+
+/** Owner/party actions for a bounty card (dispute open + arbitration). */
+function bountyActions(b) {
+  const w = STATE.wallet?.address;
+  if (!w) return '';
+  const btns = [];
+  // Funder or claimant can open a dispute on a CLAIMED bounty.
+  if (b.status === 1 && (w === b.funder || w === b.claimant)) {
+    btns.push('<button class="btn-ghost pg-mini" data-act="dispute" data-bounty="' + b.id + '">⚖ Dispute</button>');
+  }
+  // Repo owner can arbitrate a DISPUTED bounty.
+  const cap = b.status === 4 ? ownerCapFor(b.repoId) : null;
+  if (cap) {
+    btns.push('<button class="btn-ghost pg-mini" data-act="resolve" data-bounty="' + b.id + '" data-repo="' + b.repoId + '" data-cap="' + cap + '">Resolve dispute</button>');
+  }
+  return btns.length ? '<div class="pg-card-actions">' + btns.join('') + '</div>' : '';
 }
 
 /* ---------- Activity feed view ---------- */

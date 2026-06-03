@@ -363,15 +363,62 @@ export async function actPostBounty(repoId) {
     { id: 'title', label: 'Title', type: 'text' },
     { id: 'amount', label: 'Amount (SUI)', type: 'number' },
     { id: 'minScore', label: 'Minimum agent score (0 = anyone)', type: 'number', value: '0' },
+    { id: 'deadline', label: 'Deadline (optional, e.g. 2026-07-01T12:00)', type: 'datetime-local' },
+    { id: 'proof', label: 'Require proof before payout', type: 'select', value: 'no', options: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }] },
   ], async (v, setBusy) => {
     setBusy(true);
     try {
       const mist = Math.round(Number(v.amount) * 1e9);
       const minScore = Math.max(0, Math.floor(Number(v.minScore) || 0));
+      const deadlineMs = v.deadline ? Date.parse(v.deadline) : 0;
+      const proofRequired = v.proof === 'yes';
       const tx = new Transaction();
       const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(mist)]);
-      pkgCall(tx, 'bounty::post_bounty', [tx.object(repoId), tx.pure.string(v.title), coin, tx.pure.u64(minScore)]);
+      // Use post_bounty_v2 (terms + companion BountyTerms) when a deadline or proof
+      // requirement is set; otherwise the simpler v1 path.
+      if (deadlineMs > 0 || proofRequired) {
+        pkgCall(tx, 'bounty::post_bounty_v2', [
+          tx.object(repoId), tx.pure.string(v.title), coin, tx.pure.u64(minScore),
+          tx.pure.u64(Number.isFinite(deadlineMs) ? deadlineMs : 0), tx.pure.bool(proofRequired),
+        ]);
+      } else {
+        pkgCall(tx, 'bounty::post_bounty', [tx.object(repoId), tx.pure.string(v.title), coin, tx.pure.u64(minScore)]);
+      }
       const r = await signAndRun(tx, 'Bounty posted'); if (r) closeModal();
+    } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
+/** Open a dispute on a CLAIMED bounty (funder or claimant). */
+export async function actOpenDispute(bountyId) {
+  formModal('Open a dispute', [
+    { id: 'reason', label: 'Reason / evidence', type: 'textarea' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const tx = new Transaction();
+      pkgCall(tx, 'bounty::open_dispute', [tx.object(bountyId), tx.pure.string(v.reason || 'disputed')]);
+      const r = await signAndRun(tx, 'Dispute opened'); if (r) closeModal();
+    } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
+/** Arbitrate a dispute (repo owner). Splits escrow: payout_bps to claimant, fee to
+    treasury, remainder refunded to funder. */
+export async function actResolveDispute(bountyId, repoId, ownerCapId) {
+  formModal('Resolve dispute', [
+    { id: 'dispute', label: 'BountyDispute object id (0x…)', type: 'text' },
+    { id: 'bps', label: 'Award to claimant (%) — rest refunded to funder', type: 'number', value: '50' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const bps = Math.max(0, Math.min(10000, Math.round((Number(v.bps) || 0) * 100)));
+      const tx = new Transaction();
+      pkgCall(tx, 'bounty::resolve_dispute_v2', [
+        tx.object(bountyId), tx.object(v.dispute), tx.object(repoId), tx.object(ownerCapId),
+        tx.object(CFG.treasury), tx.pure.u64(bps),
+      ]);
+      const r = await signAndRun(tx, 'Dispute resolved'); if (r) closeModal();
     } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
   });
 }
