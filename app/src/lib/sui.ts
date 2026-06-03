@@ -25,6 +25,9 @@ const DEPLOYMENTS_PATH = join(__dirname, "..", "..", "..", "move", "signet", "de
 export interface Deployment {
   chainId: string;
   packageId: string;
+  /** Latest upgrade id — WRITES target this so new functions resolve. Falls back
+   * to packageId. Reads/event filters keep using the original packageId. */
+  latestPackageId?: string;
   forgeRegistry: string;
   upgradeCap: string;
   /** Upgraded package that contains the `playground` module (optional). */
@@ -33,6 +36,15 @@ export interface Deployment {
   starRegistry?: string;
   /** Shared BuilderBoard object for the playground module (optional). */
   builderBoard?: string;
+  /** Shared Treasury object (protocol fees). */
+  treasury?: string;
+  /** Shared ReliabilityLedger object (agent SLA counters). */
+  reliabilityLedger?: string;
+}
+
+/** Package id forge-module WRITES should target (latest upgrade, else original). */
+export function writePkg(d: Deployment): string {
+  return d.latestPackageId || d.packageId;
 }
 
 export function loadDeployment(network = "testnet"): Deployment {
@@ -154,7 +166,7 @@ export async function createRepo(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::forge::create_repo`,
+    target: `${writePkg(ctx.deployment)}::forge::create_repo`,
     arguments: [
       tx.object(ctx.deployment.forgeRegistry),
       tx.pure.string(args.name),
@@ -178,7 +190,7 @@ export async function grantAgentCap(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::forge::grant_agent_cap`,
+    target: `${writePkg(ctx.deployment)}::forge::grant_agent_cap`,
     arguments: [
       tx.object(args.repoId),
       tx.object(args.ownerCapId),
@@ -204,7 +216,7 @@ export async function openPrAsAgent(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::pull_request::open_pr_as_agent`,
+    target: `${writePkg(ctx.deployment)}::pull_request::open_pr_as_agent`,
     arguments: [
       tx.object(args.repoId),
       tx.object(args.reputationId),
@@ -230,7 +242,7 @@ export async function submitReviewAsAgent(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::pull_request::submit_review_as_agent`,
+    target: `${writePkg(ctx.deployment)}::pull_request::submit_review_as_agent`,
     arguments: [
       tx.object(args.repoId),
       tx.object(args.reputationId),
@@ -249,7 +261,7 @@ export async function mergePr(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::pull_request::merge_pr`,
+    target: `${writePkg(ctx.deployment)}::pull_request::merge_pr`,
     arguments: [
       tx.object(args.repoId),
       tx.object(args.reputationId),
@@ -266,7 +278,7 @@ export async function revokeAgentCap(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::forge::revoke_agent_cap`,
+    target: `${writePkg(ctx.deployment)}::forge::revoke_agent_cap`,
     arguments: [
       tx.object(args.repoId),
       tx.object(args.ownerCapId),
@@ -291,7 +303,7 @@ export async function publishRelease(
   const tx = new Transaction();
   if (args.mergedPrId) {
     tx.moveCall({
-      target: `${ctx.deployment.packageId}::release::publish_release_v2`,
+      target: `${writePkg(ctx.deployment)}::release::publish_release_v2`,
       arguments: [
         tx.object(args.repoId),
         tx.object(args.ownerCapId),
@@ -303,7 +315,7 @@ export async function publishRelease(
     });
   } else {
     tx.moveCall({
-      target: `${ctx.deployment.packageId}::release::publish_release`,
+      target: `${writePkg(ctx.deployment)}::release::publish_release`,
       arguments: [
         tx.object(args.repoId),
         tx.object(args.ownerCapId),
@@ -325,7 +337,7 @@ export async function openIssue(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::issue::open_issue`,
+    target: `${writePkg(ctx.deployment)}::issue::open_issue`,
     arguments: [tx.object(args.repoId), tx.pure.string(args.title), tx.pure.string(args.bodyBlob)],
   });
   return sign(ctx, tx);
@@ -337,7 +349,7 @@ export async function commentIssue(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::issue::comment_issue`,
+    target: `${writePkg(ctx.deployment)}::issue::comment_issue`,
     arguments: [tx.object(args.issueId), tx.pure.string(args.bodyBlob)],
   });
   return sign(ctx, tx);
@@ -353,7 +365,7 @@ export async function postBounty(
   const tx = new Transaction();
   const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.amountMist)]);
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::bounty::post_bounty`,
+    target: `${writePkg(ctx.deployment)}::bounty::post_bounty`,
     arguments: [
       tx.object(args.repoId),
       tx.pure.string(args.title),
@@ -367,7 +379,7 @@ export async function postBounty(
 export async function claimBounty(ctx: ForgeContext, args: { bountyId: string; reputationId: string }) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::bounty::claim_bounty`,
+    target: `${writePkg(ctx.deployment)}::bounty::claim_bounty`,
     arguments: [tx.object(args.bountyId), tx.object(args.reputationId)],
   });
   return sign(ctx, tx);
@@ -381,7 +393,7 @@ export async function vouch(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::reputation::vouch`,
+    target: `${writePkg(ctx.deployment)}::reputation::vouch`,
     arguments: [tx.object(args.reputationId), tx.pure.address(args.subject)],
   });
   return sign(ctx, tx);
@@ -394,7 +406,7 @@ export async function setMinApprovals(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::forge::set_min_approvals`,
+    target: `${writePkg(ctx.deployment)}::forge::set_min_approvals`,
     arguments: [tx.object(args.repoId), tx.object(args.ownerCapId), tx.pure.u8(args.n)],
   });
   return sign(ctx, tx);
@@ -406,7 +418,7 @@ export async function submitBounty(
 ) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::bounty::submit_bounty`,
+    target: `${writePkg(ctx.deployment)}::bounty::submit_bounty`,
     arguments: [tx.object(args.bountyId), tx.pure.string(args.proof)],
   });
   return sign(ctx, tx);
@@ -454,8 +466,84 @@ export async function publishApp(
 export async function approveBounty(ctx: ForgeContext, args: { bountyId: string }) {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${ctx.deployment.packageId}::bounty::approve_bounty`,
+    target: `${writePkg(ctx.deployment)}::bounty::approve_bounty`,
     arguments: [tx.object(args.bountyId)],
+  });
+  return sign(ctx, tx);
+}
+
+/** Post a bounty with terms (deadline + proof requirement). v2 creates a
+ *  companion BountyTerms object. deadlineMs = absolute Unix ms (0 = none). */
+export async function postBountyV2(
+  ctx: ForgeContext,
+  args: { repoId: string; title: string; amountMist: number; minScore?: number; deadlineMs?: number; proofRequired?: boolean },
+) {
+  const tx = new Transaction();
+  const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(args.amountMist)]);
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::bounty::post_bounty_v2`,
+    arguments: [
+      tx.object(args.repoId),
+      tx.pure.string(args.title),
+      payment,
+      tx.pure.u64(args.minScore ?? 0),
+      tx.pure.u64(args.deadlineMs ?? 0),
+      tx.pure.bool(args.proofRequired ?? false),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
+/** Open a dispute on a CLAIMED bounty (funder or claimant). Records the
+ *  claimant's disputed SLA signal in the ReliabilityLedger. */
+export async function openDispute(
+  ctx: ForgeContext,
+  args: { bountyId: string; reason: string },
+) {
+  const ledger = ctx.deployment.reliabilityLedger;
+  if (!ledger) throw new Error("deployment.reliabilityLedger not set");
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::bounty::open_dispute`,
+    arguments: [tx.object(args.bountyId), tx.pure.string(args.reason), tx.object(ledger)],
+  });
+  return sign(ctx, tx);
+}
+
+/** Arbitrate a dispute (repo owner). payoutBps = share of escrow to the
+ *  claimant (0..10000); fee → treasury, remainder refunded to funder. */
+export async function resolveDispute(
+  ctx: ForgeContext,
+  args: { bountyId: string; disputeId: string; repoId: string; ownerCapId: string; payoutBps: number },
+) {
+  const treasury = ctx.deployment.treasury;
+  if (!treasury) throw new Error("deployment.treasury not set");
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::bounty::resolve_dispute_v2`,
+    arguments: [
+      tx.object(args.bountyId),
+      tx.object(args.disputeId),
+      tx.object(args.repoId),
+      tx.object(args.ownerCapId),
+      tx.object(treasury),
+      tx.pure.u64(args.payoutBps),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
+/** Funder reclaims a CLAIMED bounty past its deadline (records expired SLA). */
+export async function cancelExpired(
+  ctx: ForgeContext,
+  args: { bountyId: string; termsId: string },
+) {
+  const ledger = ctx.deployment.reliabilityLedger;
+  if (!ledger) throw new Error("deployment.reliabilityLedger not set");
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::bounty::cancel_expired`,
+    arguments: [tx.object(args.bountyId), tx.object(args.termsId), tx.object("0x6"), tx.object(ledger)],
   });
   return sign(ctx, tx);
 }

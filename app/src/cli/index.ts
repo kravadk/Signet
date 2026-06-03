@@ -33,6 +33,11 @@ import {
   publishRelease,
   vouch,
   setMinApprovals,
+  postBountyV2,
+  claimBounty,
+  openDispute,
+  resolveDispute,
+  cancelExpired,
   createdOfType,
   SCOPE_OPEN_PR,
   SCOPE_REVIEW,
@@ -531,6 +536,86 @@ program
     console.log(`current_snapshot: ${fields.current_snapshot}`);
     console.log(`ref_version:      ${fields.ref_version}`);
     console.log(`latest_release:   ${JSON.stringify(fields.latest_release)}`);
+  });
+
+program
+  .command("post-bounty-v2")
+  .description("Post a bounty with terms (deadline + proof requirement)")
+  .requiredOption("-t, --title <title>", "bounty title")
+  .requiredOption("-a, --amount <mist>", "escrow amount in MIST")
+  .option("-d, --dir <dir>", "repo dir", ".")
+  .option("--min-score <n>", "minimum agent score to claim", "0")
+  .option("--deadline <ms>", "absolute Unix-ms deadline (0 = none)", "0")
+  .option("--proof", "require a proof submission before payout", false)
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const s = loadState(opts.dir);
+    const res = await postBountyV2(ctx, {
+      repoId: s.repoId,
+      title: opts.title,
+      amountMist: Number(opts.amount),
+      minScore: Number(opts.minScore),
+      deadlineMs: Number(opts.deadline),
+      proofRequired: !!opts.proof,
+    });
+    const bountyId = createdOfType(res, "::bounty::Bounty")[0];
+    const termsId = createdOfType(res, "::bounty::BountyTerms")[0];
+    console.log(`✓ bounty posted\n  bounty: ${bountyId}\n  terms:  ${termsId}\n  tx:     ${res.digest}`);
+  });
+
+program
+  .command("claim-bounty")
+  .description("Claim an open bounty (commit to delivering the work)")
+  .requiredOption("--bounty <id>", "Bounty object id")
+  .option("-d, --dir <dir>", "repo dir", ".")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const s = loadState(opts.dir);
+    const res = await claimBounty(ctx, { bountyId: opts.bounty, reputationId: s.reputationId });
+    console.log(`✓ bounty claimed\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("open-dispute")
+  .description("Open a dispute on a CLAIMED bounty (funder or claimant)")
+  .requiredOption("--bounty <id>", "Bounty object id")
+  .option("--reason <text>", "reason / evidence", "disputed")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const res = await openDispute(ctx, { bountyId: opts.bounty, reason: opts.reason });
+    const disputeId = createdOfType(res, "::bounty::BountyDispute")[0];
+    console.log(`✓ dispute opened\n  dispute: ${disputeId}\n  tx:      ${res.digest}`);
+  });
+
+program
+  .command("resolve-dispute")
+  .description("Arbitrate a dispute (repo owner): split escrow, fee -> treasury")
+  .requiredOption("--bounty <id>", "Bounty object id")
+  .requiredOption("--dispute <id>", "BountyDispute object id")
+  .requiredOption("--bps <0-10000>", "share of escrow to the claimant (basis points)")
+  .option("-d, --dir <dir>", "repo dir", ".")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const s = loadState(opts.dir);
+    const res = await resolveDispute(ctx, {
+      bountyId: opts.bounty,
+      disputeId: opts.dispute,
+      repoId: s.repoId,
+      ownerCapId: s.ownerCapId,
+      payoutBps: Number(opts.bps),
+    });
+    console.log(`✓ dispute resolved\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("cancel-expired")
+  .description("Reclaim a CLAIMED bounty past its deadline (funder only)")
+  .requiredOption("--bounty <id>", "Bounty object id")
+  .requiredOption("--terms <id>", "BountyTerms object id")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const res = await cancelExpired(ctx, { bountyId: opts.bounty, termsId: opts.terms });
+    console.log(`✓ bounty reclaimed (expired)\n  tx: ${res.digest}`);
   });
 
 program.parseAsync(process.argv).catch((e) => {
