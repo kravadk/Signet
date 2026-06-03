@@ -1,0 +1,15 @@
+{
+  "name": "signet-importer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Keyless GitHub importer: clone -> CLI-compatible snapshot -> Walrus -> blob ids (the browser then signs create_repo).",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node --import tsx index.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "tsx": "^4.19.2"
+  }
+}

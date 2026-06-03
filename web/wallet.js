@@ -457,6 +457,46 @@ export async function actGrantAgent(repoId, ownerCapId) {
   });
 }
 
+/** Import a GitHub repo: keyless importer service snapshots it to Walrus, then the
+ *  user signs create_repo with the returned manifest. Falls back to the CLI command
+ *  when no importer service is configured. */
+export async function actImportFromGitHub() {
+  if (!CFG.importProxyUrl) {
+    openModal({
+      title: 'Import from GitHub',
+      bodyHtml: '<p>No importer service is configured. Run it locally with the Signet CLI:</p>'
+        + '<pre class="cmd-block mono">FORGE_NETWORK=' + escapeHtml(CFG.network || 'testnet')
+        + ' npx @signet/cli import --url https://github.com/&lt;owner&gt;/&lt;repo&gt; --branch main</pre>'
+        + '<p class="pg-dim">Or host <span class="mono">server/importer</span> and set <span class="mono">importProxyUrl</span> in web/config.js for one-click import.</p>'
+        + '<div class="modal-actions"><button class="btn-primary" id="impOk">Got it</button></div>',
+      onMount(m) { m.querySelector('#impOk').addEventListener('click', closeModal); },
+    });
+    return;
+  }
+  formModal('Import from GitHub', [
+    { id: 'url', label: 'GitHub URL (https://github.com/owner/repo)', type: 'text' },
+    { id: 'branch', label: 'Branch', type: 'text', value: 'main' },
+    { id: 'name', label: 'Repo name (optional — defaults to the GitHub name)', type: 'text' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const res = await withTimeout(fetch(CFG.importProxyUrl.replace(/\/$/, '') + '/import', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: v.url, branch: v.branch || 'main' }),
+      }), 90000, 'import');
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || 'import failed');
+      const name = (v.name || out.name || '').trim();
+      const tx = new Transaction();
+      pkgCall(tx, 'forge::create_repo', [
+        tx.object(CFG.forgeRegistry), tx.pure.string(name),
+        tx.pure.string(out.branch || v.branch || 'main'), tx.pure.string(out.manifestBlob),
+      ]);
+      const r = await signAndRun(tx, `Imported ${name} (${out.files} files)`); if (r) closeModal();
+    } catch (e) { toast('Import failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
 export async function actMergePr(repoId, prId, ownerCapId, reputationId) {
   const tx = new Transaction();
   pkgCall(tx, 'pull_request::merge_pr', [tx.object(repoId), tx.object(reputationId), tx.object(prId), tx.object(ownerCapId)]);

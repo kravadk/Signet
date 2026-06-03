@@ -17,7 +17,7 @@ import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeleton
 import {
   wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor,
   resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr,
-  actVouch, actSetApprovals, actOpenDispute, actResolveDispute,
+  actVouch, actSetApprovals, actOpenDispute, actResolveDispute, actImportFromGitHub,
 } from './wallet.js';
 import { wirePlayground, renderPlaygroundView, loadGallery } from './playground.js';
 import { beginZkLogin, completeZkLoginFromRedirect, restoreZkLogin, zkConfigured } from './zklogin.js';
@@ -1085,7 +1085,8 @@ function renderReposView() {
   if (!el) return;
   const cmd = cmdPanel('Create a repository',
     'npm run forge -- init --name <repo-name> --dir <path-to-code>',
-    'Creating a repo snapshots your code to Walrus and creates the on-chain Repository. Runs in your terminal (local keystore).');
+    'Creating a repo snapshots your code to Walrus and creates the on-chain Repository. Runs in your terminal (local keystore) — or import from GitHub →',
+    { label: '⭳ Import from GitHub', fn: () => actImportFromGitHub() });
   if (!STATE.repos.length) { el.innerHTML = cmd + '<div class="empty-state">No repositories on-chain yet.</div>'; return; }
   el.innerHTML = cmd + STATE.repos.map((r) =>
     '<div class="repo-card clickable" data-repoid="' + r.id + '">' +

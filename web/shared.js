@@ -49,6 +49,9 @@ const DEPLOYMENTS = {
     nameRegistry: '0xf802954a95dab72f878175aa2340ca7be25055210f44be5f51af15b0d8b62f10',
     treasury: '0x9062ed0b2d6506d9108632bead5a6a466320a85bf51359b00611c94fd89ad921',
     reliabilityLedger: '0x15fdb90609f55671830f285b2595463503b2e3e5310fa3d9f2789770b14c1973',
+    // Optional keyless GitHub-importer service (server/importer). Empty → the web
+    // shows the `forge import` CLI command instead of a one-click import.
+    importProxyUrl: '',
     forkRegistry: '0xc774e8caffee5289079454422c2adb7ed425e58e1e657e8fcc0534971d753909',
     privacyRegistry: '0x1c33121003f42314aa424cebc63c41eab346744eef0c871f98c73d24f8ecd20f',
     // workspaceRegistry: '<create_workspace_registry object id after team-private v2 deploy>',
