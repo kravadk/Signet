@@ -289,6 +289,17 @@ function previewHtml(spec) {
   return withCSP(inlineApp(spec.files));
 }
 
+/* Starter templates — categorized, with detailed prompts that steer the LLM
+   toward a complete single-page app. Clicking one fills the prompt box. */
+const TEMPLATES = [
+  { label: 'DeFi dashboard', category: 'data', prompt: 'A DeFi portfolio dashboard: token balance cards with 24h change, an allocation donut chart, a sortable positions table, and a simple line chart of total value. Use mock data, a dark theme, and clean typography. Single self-contained HTML file with inline CSS/JS (no external libraries).' },
+  { label: 'NFT mint page', category: 'art', prompt: 'An NFT collection mint page: hero with collection art placeholder, live mint counter (e.g. 1240/5000), quantity stepper, a prominent Mint button with a fake wallet-connect state, rarity/traits preview grid, and a roadmap section. Polished web3 aesthetic, responsive, single self-contained HTML file with inline CSS/JS.' },
+  { label: 'DAO vote tool', category: 'tool', prompt: 'A DAO governance UI: list of proposals each with title, status (active/passed/failed), vote tallies as For/Against bars, quorum indicator, and Vote For / Vote Against buttons that update tallies client-side. Include a "Create proposal" modal. Mock data, clean governance aesthetic, single self-contained HTML file with inline CSS/JS.' },
+  { label: 'Arcade game', category: 'game', prompt: 'A small canvas arcade game (e.g. asteroid dodger or breakout) with start/pause, score, lives, increasing difficulty, keyboard + touch controls, and a game-over screen with restart. 60fps requestAnimationFrame loop. Single self-contained HTML file with inline CSS/JS, no assets.' },
+  { label: 'Product landing', category: 'tool', prompt: 'A modern SaaS product landing page: sticky nav, hero with headline + CTA, three feature cards with icons, a pricing table (3 tiers), a testimonial, and a footer. Smooth scroll, subtle entrance animations, responsive, distinctive typography. Single self-contained HTML file with inline CSS/JS.' },
+  { label: 'Data visualizer', category: 'data', prompt: 'An interactive data visualizer: paste or load sample CSV/JSON, then render a bar chart and a line chart with hover tooltips and a metric selector dropdown. Pure SVG/canvas (no chart libraries), dark theme, responsive. Single self-contained HTML file with inline CSS/JS.' },
+];
+
 /* ============================================================
    View render
    ============================================================ */
@@ -361,15 +372,8 @@ export function renderPlaygroundView() {
     <div class="card-grid" id="pgBounties"></div>
   `;
 
-  const examples = [
-    'A particle system that reacts to mouse movement',
-    'A pomodoro timer with an animated countdown ring',
-    "Conway's Game of Life with draw + pause controls",
-    'A keyboard piano — 2 octaves, polyphonic',
-    'A mini kanban board with drag-and-drop cards',
-    'A retro ASCII art generator',
-  ];
-  $('pgExamples').innerHTML = examples.map((e) => `<button class="pg-example">${escapeHtml(e)}</button>`).join('');
+  $('pgExamples').innerHTML = TEMPLATES.map((t) =>
+    `<button class="pg-example" data-prompt="${escapeHtml(t.prompt)}" title="${escapeHtml(t.category)} template">${escapeHtml(t.label)}</button>`).join('');
   refreshKeyState();
 }
 
@@ -1580,7 +1584,7 @@ export function wirePlayground() {
     else if (t.id === 'pgSettings') openSettings();
     else if (t.id === 'pgPublish') publish();
     else if (t.id === 'pgPostBounty') postBounty();
-    else if (t.classList?.contains('pg-example')) { $('pgInput').value = t.textContent; $('pgInput').focus(); }
+    else if (t.classList?.contains('pg-example')) { $('pgInput').value = t.dataset.prompt || t.textContent; $('pgInput').focus(); }
     else if (t.classList?.contains('pg-pill')) {
       root.querySelectorAll('.pg-pill').forEach((p) => p.classList.toggle('on', p === t));
       pg.filter = t.dataset.sort; renderGallery();
