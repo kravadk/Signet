@@ -235,6 +235,7 @@ const pg = {
   workspaces: new Map(), // app_id -> Set<member address>
   bounties: [],          // loaded open AppBounty records
   filter: 'newest',
+  cat: 'all',
   search: '',
 };
 
@@ -357,9 +358,14 @@ export function renderPlaygroundView() {
       <div class="pg-filters" id="pgFilters">
         <button class="pg-pill on" data-sort="newest">Newest</button>
         <button class="pg-pill" data-sort="trending">Trending</button>
+        <button class="pg-pill" data-sort="featured">★ Featured</button>
         <button class="pg-pill" data-sort="views">Most Viewed</button>
         <button class="pg-pill" data-sort="stars">Most Stars</button>
         <input class="pg-search" id="pgSearch" placeholder="Search apps…">
+      </div>
+      <div class="pg-cats" id="pgCats">
+        ${['all', 'game', 'tool', 'art', 'data', 'social', 'other'].map((c) =>
+          `<button class="pg-cat-pill${c === 'all' ? ' on' : ''}" data-cat="${c}">${c}</button>`).join('')}
       </div>
     </div>
     <div class="card-grid" id="pgGallery"></div>
@@ -751,6 +757,7 @@ function sortGallery(apps) {
   if (s === 'views') a.sort((x, y) => y.visits - x.visits);
   else if (s === 'stars') a.sort((x, y) => y.stars - x.stars);
   else if (s === 'trending') a.sort((x, y) => (y.stars * 3 + y.visits) - (x.stars * 3 + x.visits));
+  else if (s === 'featured') a.sort((x, y) => (y.stars * 3 + (y.tips || 0) + y.visits) - (x.stars * 3 + (x.tips || 0) + x.visits));
   else a.sort((x, y) => y.createdAt - x.createdAt);
   return a;
 }
@@ -760,6 +767,7 @@ export function renderGallery() {
   let apps = pg.gallery;
   // Moderation: drop builder-hidden apps and apps the community flagged past the threshold.
   apps = apps.filter((a) => !a.hidden && (a.flags || 0) < FLAG_HIDE_THRESHOLD);
+  if (pg.cat && pg.cat !== 'all') apps = apps.filter((a) => a.category === pg.cat);
   if (pg.search) {
     const q = pg.search.toLowerCase();
     apps = apps.filter((a) => a.name.toLowerCase().includes(q) || a.prompt.toLowerCase().includes(q) || a.category.includes(q));
@@ -1609,6 +1617,9 @@ export function wirePlayground() {
     else if (t.classList?.contains('pg-pill')) {
       root.querySelectorAll('.pg-pill').forEach((p) => p.classList.toggle('on', p === t));
       pg.filter = t.dataset.sort; renderGallery();
+    } else if (t.classList?.contains('pg-cat-pill')) {
+      root.querySelectorAll('.pg-cat-pill').forEach((p) => p.classList.toggle('on', p === t));
+      pg.cat = t.dataset.cat; renderGallery();
     } else if (t.dataset?.act === 'bounty-award') awardBounty(t.dataset.bounty);
     else if (t.dataset?.act === 'bounty-cancel') cancelBounty(t.dataset.bounty);
     else if (t.dataset?.act) {

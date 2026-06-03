@@ -428,11 +428,20 @@ export async function actGrantAgent(repoId, ownerCapId) {
   const presetOptions = Object.entries(CAP_PRESETS).map(([key, p]) => ({
     value: key, label: `${key} (${scopeChips(p.scopes).join('+') || 'none'})`,
   }));
+  // Expiry presets: epochs are ~24h on Sui, so add N to the current epoch.
+  let curEpoch = 0;
+  try { curEpoch = Number((await sui.getLatestSuiSystemState()).epoch) || 0; } catch { /* offline → Never only */ }
+  const expiryOptions = [
+    { value: '0', label: 'Never' },
+    { value: String(curEpoch + 7), label: '~7 days (7 epochs)' },
+    { value: String(curEpoch + 30), label: '~30 days (30 epochs)' },
+    { value: String(curEpoch + 90), label: '~90 days (90 epochs)' },
+  ];
   formModal('Grant AgentCap', [
     { id: 'recipient', label: 'Agent address (0x…)', type: 'text' },
     { id: 'preset', label: 'Capability preset', type: 'select', options: presetOptions, value: 'bounty-worker' },
     { id: 'label', label: 'Label (optional — defaults to preset)', type: 'text' },
-    { id: 'expires', label: 'Expiry epoch (0 = never)', type: 'number', value: '0' },
+    { id: 'expires', label: 'Expiry', type: 'select', options: expiryOptions, value: '0' },
   ], async (v, setBusy) => {
     setBusy(true);
     try {
