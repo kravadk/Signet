@@ -1,0 +1,54 @@
+name: Agent sweep (CI reviews + verify)
+
+# Scheduled CI agent: every 6h it reviews open PRs (on repos where the CI agent
+# holds a review-scope AgentCap) and re-verifies the latest release. Active only
+# when FORGE_CI_KEY is set in repo Secrets (testnet, funded); otherwise it no-ops.
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    env:
+      HAS_CI_KEY: ${{ secrets.FORGE_CI_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip notice (no key)
+        if: ${{ env.HAS_CI_KEY != 'true' }}
+        run: echo "FORGE_CI_KEY not set — add it in repo Secrets (testnet, funded, holds review caps) to enable the auto-reviewer."
+
+      - uses: actions/setup-node@v4
+        if: ${{ env.HAS_CI_KEY == 'true' }}
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Sui CLI (for `sui move test`)
+        if: ${{ env.HAS_CI_KEY == 'true' }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/MystenLabs/sui/releases/download/testnet-v1.73.0/sui-testnet-v1.73.0-ubuntu-x86_64.tgz"
+          mkdir -p "$HOME/.sui-cli"
+          curl -fsSL "$url" -o /tmp/sui.tgz && tar -xzf /tmp/sui.tgz -C /tmp
+          bin=$(find /tmp -maxdepth 2 -type f -name sui | head -1)
+          install -m 0755 "$bin" "$HOME/.sui-cli/sui"
+
+      - name: Install deps
+        if: ${{ env.HAS_CI_KEY == 'true' }}
+        working-directory: app
+        run: npm ci
+
+      - name: Run CI sweep
+        if: ${{ env.HAS_CI_KEY == 'true' }}
+        working-directory: app
+        env:
+          FORGE_CI_KEY: ${{ secrets.FORGE_CI_KEY }}
+          FORGE_NETWORK: testnet
+        run: node --import tsx scripts/ci-sweep.mjs

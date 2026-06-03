@@ -193,3 +193,19 @@ export async function readBlobText(
 export function blobUrl(blobId: string, config: WalrusConfig = ACTIVE_WALRUS): string {
   return `${config.aggregator}/v1/blobs/${blobId}`;
 }
+
+/**
+ * Renew (re-pin) an existing blob for more storage epochs by reading its bytes
+ * back from the aggregator and re-storing them. Blobs are content-addressed, so
+ * the blobId is unchanged — only the storage lifetime is extended. testnet uses
+ * the free publisher (no key); mainnet uses the `walrus store` CLI (spends WAL).
+ * Used by `forge renew` + the scheduled renew sweep so published apps don't expire.
+ */
+export async function renewBlob(blobId: string, epochs = 30): Promise<StoredBlob> {
+  const bytes = await readBlob(blobId);
+  const stored = await storeBlobAuto(bytes, { epochs });
+  if (stored.blobId !== blobId) {
+    console.warn(`renewBlob: id changed ${blobId} -> ${stored.blobId} (unexpected for content-addressed blob)`);
+  }
+  return stored;
+}

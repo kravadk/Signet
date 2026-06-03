@@ -20,7 +20,7 @@ import { Command } from "commander";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { storeBlobAuto, blobUrl } from "../lib/walrus.js";
+import { storeBlobAuto, blobUrl, renewBlob } from "../lib/walrus.js";
 import { buildSnapshot } from "../lib/snapshot.js";
 import {
   makeContext,
@@ -313,6 +313,26 @@ program
     const res = await setMinApprovals(ctx, { repoId: s.repoId, ownerCapId: s.ownerCapId, n: Number(opts.n) });
     console.log(`✓ min_approvals set to ${opts.n}`);
     console.log(`  tx: ${res.digest}`);
+  });
+
+program
+  .command("renew")
+  .description("Re-pin a published app's Walrus blobs for more epochs (so it doesn't expire)")
+  .requiredOption("--app <id>", "PublishedApp object id")
+  .option("--epochs <n>", "storage epochs", "30")
+  .action(async (opts: { app: string; epochs: string }) => {
+    const ctx = makeContext(NET);
+    const obj = await ctx.client.getObject({ id: opts.app, options: { showContent: true } });
+    const f: any = (obj.data?.content as any)?.fields ?? {};
+    const epochs = Number(opts.epochs) || 30;
+    const targets: [string, string | undefined][] = [["archive", f.archive_blob], ["manifest", f.manifest_blob]];
+    if (!targets.some(([, id]) => id)) throw new Error("Not a PublishedApp (no archive_blob/manifest_blob).");
+    for (const [label, id] of targets) {
+      if (!id) continue;
+      const r = await renewBlob(id, epochs);
+      console.log(`  renewed ${label} ${id.slice(0, 12)}… (epochs=${epochs}, ${r.alreadyCertified ? "already-certified" : "re-stored"})`);
+    }
+    console.log("✓ renew complete");
   });
 
 program

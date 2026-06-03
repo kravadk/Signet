@@ -1,0 +1,44 @@
+name: Keep-alive seed
+
+# Weekly: publish a few Playground apps so the testnet gallery stays non-empty.
+# Active only when FORGE_SEED_KEY is set in repo Secrets (testnet, funded);
+# otherwise it no-ops. Note: each run adds apps (the network grows).
+on:
+  schedule:
+    - cron: "30 3 * * 1"   # Mondays 03:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    env:
+      HAS_SEED_KEY: ${{ secrets.FORGE_SEED_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip notice (no key)
+        if: ${{ env.HAS_SEED_KEY != 'true' }}
+        run: echo "FORGE_SEED_KEY not set — add it in repo Secrets (testnet, funded) to enable keep-alive seeding."
+
+      - uses: actions/setup-node@v4
+        if: ${{ env.HAS_SEED_KEY == 'true' }}
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install deps
+        if: ${{ env.HAS_SEED_KEY == 'true' }}
+        working-directory: app
+        run: npm ci
+
+      - name: Seed gallery
+        if: ${{ env.HAS_SEED_KEY == 'true' }}
+        working-directory: app
+        env:
+          FORGE_SEED_KEY: ${{ secrets.FORGE_SEED_KEY }}
+          FORGE_NETWORK: testnet
+        run: node --import tsx scripts/seed-playground.mjs

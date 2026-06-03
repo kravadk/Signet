@@ -36,6 +36,7 @@ events — re-checkable by anyone, not a screenshot.
 - [SDK](#sdk)
 - [Verify a release (SLSA-style)](#verify-a-release-slsa-style)
 - [Backend P0 services (optional)](#backend-p0-services-optional)
+- [Automation](#automation)
 - [Why Sui + Walrus](#why-sui--walrus)
 - [What makes it different](#what-makes-it-different)
 - [Who it's for](#who-its-for)
@@ -416,6 +417,25 @@ Set the portal URL in Playground **settings** → 🔗 Share then emits `<portal
 
 Configure the URLs in Playground **settings**. To go live you provide the infra: host the
 services, fund the sponsor wallet (keep it modest/rotatable), register a Google OAuth client.
+
+---
+
+## Automation
+
+CI runs on every push/PR (Move tests, app typecheck + unit tests, server + web checks, Docker build).
+Beyond that the repo ships **self-running workflows** — all **testnet**; mainnet stays manual:
+
+| Workflow | Trigger | What it does | Needs (repo Secret) |
+|---|---|---|---|
+| `deploy-web.yml` | push to `web/**` | publish the SPA to Walrus Sites | `SUI_DEPLOY_KEY` (+ var `WALRUS_SITE_OBJECT`) |
+| `agent-sweep.yml` | every 6h | CI agent reviews open PRs (where it holds a review cap) + re-verifies the latest release | `FORGE_CI_KEY` |
+| `renew.yml` | weekly | re-pin published apps' Walrus blobs so they don't expire (keyless) | — |
+| `seed.yml` | weekly | keep the testnet gallery non-empty | `FORGE_SEED_KEY` |
+| `dependabot.yml` | weekly | dependency-update PRs | — |
+
+Each active job **no-ops until its Secret is set** (Settings → Secrets and variables → Actions), so the
+repo stays green out of the box. Keys must be **testnet, funded, throwaway** — never a mainnet key.
+Manual one-offs: `forge renew --app <id>`, `npm run seed:gallery`, `bash scripts/deploy-walrus-site.sh`.
 
 ---
 

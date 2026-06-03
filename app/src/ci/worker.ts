@@ -3,7 +3,7 @@
  * Signet CI worker.
  *
  * Acts as a dedicated CI *agent* identity (FORGE_CI_KEY) holding an AgentCap with
- * the review scope. Given a PR, it:
+ * the review scope. Given a PR, `reviewPr`:
  *   1. fetches the PR's head snapshot manifest from Walrus,
  *   2. downloads + extracts the snapshot archive into a temp dir,
  *   3. runs `sui move test` if the snapshot is a Move package,
@@ -11,7 +11,8 @@
  *   5. submits a signed review on-chain (verdict from the test result).
  *
  * This closes the chain automatically: the CI report in a release's provenance
- * is produced by a real test run, not typed by a human.
+ * is produced by a real test run, not typed by a human. `reviewPr` is exported so
+ * the scheduled sweep (app/scripts/ci-sweep.mjs) can call it for many PRs.
  *
  * Usage: FORGE_CI_KEY=suiprivkey1... npx tsx src/ci/worker.ts \
  *          --repo 0x.. --pr 0x.. --cap 0x..
@@ -37,9 +38,10 @@ function arg(name: string): string | undefined {
 }
 
 function findSuiBin(): string {
-  // Prefer the local install used elsewhere in the project.
+  // Prefer the local install used elsewhere in the project; fall back to PATH `sui`.
   const home = process.env.USERPROFILE || process.env.HOME || "";
-  return join(home, ".sui-cli", process.platform === "win32" ? "sui.exe" : "sui");
+  const local = join(home, ".sui-cli", process.platform === "win32" ? "sui.exe" : "sui");
+  return process.env.SUI_BIN || local;
 }
 
 /** Run `sui move test` in `dir`; return {passed, output}. */
@@ -59,18 +61,21 @@ function runMoveTest(dir: string): { passed: boolean; output: string } {
   }
 }
 
-async function main() {
-  const repoId = arg("repo");
-  const prId = arg("pr");
-  const capId = arg("cap");
-  if (!repoId || !prId || !capId) {
-    console.error("usage: worker.ts --repo <id> --pr <id> --cap <agentCapId>");
-    process.exit(2);
-  }
+export interface ReviewResult {
+  passed: boolean;
+  digest: string;
+  reportBlob: string;
+}
 
-  const ctx = makeContextWithKeypair(requireCiKey());
-  console.log(`CI agent: ${ctx.address}`);
-
+/**
+ * Review one PR as the CI agent `ctx`: fetch + test the head snapshot, upload the
+ * report to Walrus, and submit a signed on-chain review. Returns the outcome.
+ * Reused by the CLI (`main`) and the scheduled sweep.
+ */
+export async function reviewPr(
+  ctx: any,
+  { repoId, prId, capId }: { repoId: string; prId: string; capId: string },
+): Promise<ReviewResult> {
   // 1. Load the PR + its head manifest.
   const pr = await getPullRequest(prId);
   if (!pr) throw new Error(`PR not found: ${prId}`);
@@ -93,7 +98,7 @@ async function main() {
     }
     console.log(`extracted ${files.size} files to ${work}`);
 
-    // 3. Run the test if it's a Move package (has Move.toml).
+    // 3. Run the test if it's a Move package (has Move.toml), else integrity-check.
     const isMove = [...files.keys()].some((p) => p.endsWith("Move.toml"));
     let report: string;
     let passed: boolean;
@@ -112,9 +117,8 @@ async function main() {
         r.output.slice(0, 4000),
       ].join("\n");
     } else {
-      // Non-Move snapshot: run a REAL integrity check. Recompute the sha256 of
-      // every extracted file and compare it to the manifest, and re-derive the
-      // manifest treeHash. passed is the actual result — never hardcoded — so a
+      // Non-Move snapshot: REAL integrity check (recompute every file sha256 +
+      // the treeHash). passed is the actual result — never hardcoded — so a
       // tampered snapshot produces an on-chain REQUEST_CHANGES, not a fake PASS.
       const mismatches: string[] = [];
       for (const entry of manifest.files) {
@@ -155,15 +159,33 @@ async function main() {
       verdict: passed ? VERDICT_APPROVE : VERDICT_REQUEST_CHANGES,
       reportBlob: reportBlob.blobId,
     });
-    console.log(`✓ CI review submitted (${passed ? "approve" : "request-changes"})`);
-    console.log(`  report: ${blobUrl(reportBlob.blobId)}`);
-    console.log(`  tx:     ${res.digest}`);
+    return { passed, digest: res.digest, reportBlob: reportBlob.blobId };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 }
 
-main().catch((e) => {
-  console.error(`\n✗ CI worker failed: ${e.message ?? e}`);
-  process.exit(1);
-});
+async function main() {
+  const repoId = arg("repo");
+  const prId = arg("pr");
+  const capId = arg("cap");
+  if (!repoId || !prId || !capId) {
+    console.error("usage: worker.ts --repo <id> --pr <id> --cap <agentCapId>");
+    process.exit(2);
+  }
+  const ctx = makeContextWithKeypair(requireCiKey());
+  console.log(`CI agent: ${ctx.address}`);
+  const r = await reviewPr(ctx, { repoId, prId, capId });
+  console.log(`✓ CI review submitted (${r.passed ? "approve" : "request-changes"})`);
+  console.log(`  report: ${blobUrl(r.reportBlob)}`);
+  console.log(`  tx:     ${r.digest}`);
+}
+
+// Run as a CLI only when invoked directly (so importing reviewPr doesn't execute main).
+const entry = (process.argv[1] || "").replace(/\\/g, "/");
+if (/\/ci\/worker\.(ts|js|mjs)$/.test(entry)) {
+  main().catch((e) => {
+    console.error(`\n✗ CI worker failed: ${e.message ?? e}`);
+    process.exit(1);
+  });
+}

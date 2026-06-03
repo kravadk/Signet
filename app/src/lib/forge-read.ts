@@ -116,6 +116,16 @@ export async function getPullRequest(id: string): Promise<PullRequest | null> {
   };
 }
 
+/** All OPEN pull requests (status 0), optionally filtered to one repo. Paginated. */
+export async function listOpenPullRequests(repoId?: string): Promise<PullRequest[]> {
+  const data = await queryAllEvents({ MoveEventType: `${PACKAGE}::pull_request::PrOpened` });
+  const ids = data.map((e) => (e.parsedJson as any)?.pr_id).filter(Boolean) as string[];
+  const prs = await Promise.all(ids.map((id) => getPullRequest(id).catch(() => null)));
+  return prs.filter(
+    (p): p is PullRequest => p !== null && p.status === 0 && (!repoId || p.repoId === repoId),
+  );
+}
+
 export async function getRelease(id: string): Promise<Release | null> {
   const obj = await client.getObject({ id, options: { showContent: true } });
   const f = fields(obj);
