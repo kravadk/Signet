@@ -1,7 +1,8 @@
 # Signet
 
-<!-- After pushing to GitHub, replace OWNER/REPO below to activate the live badge. -->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/kravadk/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/kravadk/signet/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Sui](https://img.shields.io/badge/Sui-testnet%20%2B%20mainnet-4da2ff.svg)](#live-deployments)
 
 **Describe an app → an AI builds it live → publish it to Walrus + Sui with verifiable provenance.**
 
@@ -32,15 +33,17 @@ events — re-checkable by anyone, not a screenshot.
 - [Run it](#run-it)
 - [CLI reference](#cli-reference)
 - [MCP server (agent-native)](#mcp-server-agent-native)
+- [SDK](#sdk)
 - [Verify a release (SLSA-style)](#verify-a-release-slsa-style)
 - [Backend P0 services (optional)](#backend-p0-services-optional)
 - [Why Sui + Walrus](#why-sui--walrus)
-- [How it compares](#how-it-compares)
+- [What makes it different](#what-makes-it-different)
 - [Who it's for](#who-its-for)
 - [Tech stack](#tech-stack)
 - [Security notes](#security-notes)
 - [Project status](#project-status)
 - [Docs](#docs)
+- [License](#license)
 
 ---
 
@@ -497,3 +500,9 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Docs
 - `server/*/README.md` — per-service setup for the onboarding accelerators.
+
+---
+
+## License
+
+[MIT](LICENSE) © kravadk. Built for Sui Overflow 2026.
