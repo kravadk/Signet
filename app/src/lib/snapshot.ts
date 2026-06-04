@@ -32,6 +32,12 @@ export interface Manifest {
   files: FileEntry[];
   /** Hash over the sorted (path, sha256) pairs — identifies the whole tree. */
   treeHash: string;
+  /**
+   * Merkle root over the per-file leaves (sha256("path:sha256")). Lets anyone
+   * prove a single file belongs to this snapshot with a O(log n) proof — without
+   * fetching the whole archive. Optional: snapshots built before this field lack it.
+   */
+  merkleRoot?: string;
 }
 
 const IGNORE = new Set([
@@ -129,6 +135,7 @@ export function buildSnapshotFromMemory(args: {
   const treeHash = sha256(
     new TextEncoder().encode(entries.map((e) => `${e.path}:${e.sha256}`).join("\n")),
   );
+  const merkleRoot = computeMerkleRoot(entries.map(fileLeaf));
 
   const manifest: Manifest = {
     name: args.name,
@@ -137,6 +144,7 @@ export function buildSnapshotFromMemory(args: {
     previousSnapshot: args.previousSnapshot,
     files: entries,
     treeHash,
+    merkleRoot,
   };
 
   return { archive, manifest };
@@ -157,6 +165,80 @@ export function verifyTreeHash(m: Manifest): boolean {
     new TextEncoder().encode(m.files.map((e) => `${e.path}:${e.sha256}`).join("\n")),
   );
   return recomputed === m.treeHash;
+}
+
+// ===== Merkle inclusion proofs =====
+//
+// Leaf = sha256("path:sha256"); parent = sha256(left || right) over the hex
+// strings; odd nodes duplicate the last. A proof lets anyone verify a single
+// file belongs to a snapshot against `manifest.merkleRoot` without the archive.
+
+function sha256hex(s: string): string {
+  return createHash("sha256").update(new TextEncoder().encode(s)).digest("hex");
+}
+/** The Merkle leaf for a file entry. */
+export function fileLeaf(e: { path: string; sha256: string }): string {
+  return sha256hex(`${e.path}:${e.sha256}`);
+}
+/** Compute the Merkle root over an ordered list of leaf hashes (hex). */
+export function computeMerkleRoot(leaves: string[]): string {
+  if (leaves.length === 0) return sha256hex("");
+  let level = leaves.slice();
+  while (level.length > 1) {
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i];
+      const right = i + 1 < level.length ? level[i + 1] : left; // duplicate odd
+      next.push(sha256hex(left + right));
+    }
+    level = next;
+  }
+  return level[0];
+}
+
+export interface MerkleProof {
+  path: string;
+  sha256: string;
+  leaf: string;
+  index: number;
+  /** Bottom-up sibling hashes; `left` = sibling sits on the left of the pair. */
+  siblings: { hash: string; left: boolean }[];
+  root: string;
+}
+
+/** Build an inclusion proof for `filePath` against a manifest's file list. */
+export function merkleProof(m: Manifest, filePath: string): MerkleProof | null {
+  const target = toPosix(filePath);
+  const idx = m.files.findIndex((e) => e.path === target);
+  if (idx < 0) return null;
+  let level = m.files.map(fileLeaf);
+  const leaf = level[idx];
+  const siblings: { hash: string; left: boolean }[] = [];
+  let i = idx;
+  while (level.length > 1) {
+    const isRight = i % 2 === 1;
+    const sibIdx = isRight ? i - 1 : i + 1;
+    const sib = sibIdx < level.length ? level[sibIdx] : level[i]; // duplicated odd
+    siblings.push({ hash: sib, left: isRight });
+    const next: string[] = [];
+    for (let k = 0; k < level.length; k += 2) {
+      const left = level[k];
+      const right = k + 1 < level.length ? level[k + 1] : left;
+      next.push(sha256hex(left + right));
+    }
+    level = next;
+    i = Math.floor(i / 2);
+  }
+  return { path: target, sha256: m.files[idx].sha256, leaf, index: idx, siblings, root: level[0] };
+}
+
+/** Verify an inclusion proof folds up to `expectedRoot`. */
+export function verifyMerkleProof(proof: MerkleProof, expectedRoot: string): boolean {
+  // The leaf must match the claimed file (path:sha256), then fold to the root.
+  if (proof.leaf !== fileLeaf({ path: proof.path, sha256: proof.sha256 })) return false;
+  let h = proof.leaf;
+  for (const s of proof.siblings) h = s.left ? sha256hex(s.hash + h) : sha256hex(h + s.hash);
+  return h === proof.root && proof.root === expectedRoot;
 }
 
 /** Inflate an archive produced by buildSnapshot back into path -> bytes. */

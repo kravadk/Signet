@@ -24,6 +24,7 @@ const deployment = JSON.parse(
   readFileSync(join(__dirname, "..", "..", "move", "signet", "deployments.json"), "utf8"),
 )[NET];
 const PACKAGE: string = deployment.packageId;
+const WRITE_PACKAGE: string = deployment.latestPackageId ?? PACKAGE;
 const PLAYGROUND_PACKAGE: string = deployment.playgroundPackageId ?? PACKAGE;
 const PLAYGROUND_EVENT_PKGS: string[] = deployment.playgroundEventPkgs?.length
   ? deployment.playgroundEventPkgs
@@ -31,6 +32,10 @@ const PLAYGROUND_EVENT_PKGS: string[] = deployment.playgroundEventPkgs?.length
 
 const client = new SuiClient({ url: getFullnodeUrl(NET) });
 let ready = false; // becomes true after the first successful poll
+let lastPollOkAt = 0;
+let lastPollError = "";
+let pollCount = 0;
+let pollErrorCount = 0;
 const db = new DatabaseSync(join(__dirname, "..", "forge.db"));
 db.exec("PRAGMA journal_mode = WAL;");
 
@@ -83,6 +88,11 @@ CREATE TABLE IF NOT EXISTS app_bounties (
   id TEXT PRIMARY KEY, poster TEXT, reward INTEGER, status INTEGER DEFAULT 0,
   fulfilled_app TEXT, winner TEXT, paid INTEGER DEFAULT 0, fee INTEGER DEFAULT 0,
   created_at INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS payment_requests (
+  id TEXT PRIMARY KEY, creator TEXT, recipient TEXT, label TEXT,
+  amount INTEGER, status INTEGER DEFAULT 0, payer TEXT,
+  created_at INTEGER DEFAULT 0, expires_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS cursors (
   module TEXT PRIMARY KEY,
@@ -160,6 +170,11 @@ const up = {
      VALUES (@id,@poster,@reward,@status,@created_at)
      ON CONFLICT(id) DO UPDATE SET status=@status`,
   ),
+  paymentRequest: db.prepare(
+    `INSERT INTO payment_requests (id,creator,recipient,label,amount,status,payer,created_at,expires_at)
+     VALUES (@id,@creator,@recipient,@label,@amount,@status,@payer,@created_at,@expires_at)
+     ON CONFLICT(id) DO UPDATE SET status=@status, payer=@payer`,
+  ),
   webhookSub: db.prepare(
     `INSERT INTO webhook_subscriptions (id,event_type,target_url,secret,active,created_at)
      VALUES (@id,@event_type,@target_url,@secret,1,@created_at)`,
@@ -181,6 +196,23 @@ const up = {
 
 type WebhookJob = { eventType: string; payload: any };
 const webhookQueue: WebhookJob[] = [];
+const startedAt = Date.now();
+const requestMetrics = new Map<string, { count: number; totalMs: number; errors: number }>();
+
+function log(level: "info" | "warn" | "error", msg: string, extra: Record<string, any> = {}) {
+  console[level === "error" ? "error" : "log"](JSON.stringify({ level, msg, ts: new Date().toISOString(), ...extra }));
+}
+
+const ERROR_DSN = process.env.ERROR_TRACKING_DSN || "";
+async function trackError(error: unknown, context: Record<string, any> = {}) {
+  const payload = { error: String((error as any)?.message ?? error), context, ts: new Date().toISOString() };
+  if (!ERROR_DSN) { log("error", "tracked error", payload); return; }
+  try {
+    await fetch(ERROR_DSN, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  } catch (e: any) {
+    log("warn", "error tracking delivery failed", { error: String(e?.message ?? e) });
+  }
+}
 
 function eventName(short: string): string | null {
   switch (short) {
@@ -189,12 +221,13 @@ function eventName(short: string): string | null {
     case "BountyPaid": return "bounty.paid";
     case "AppPublished": return "app.published";
     case "ReviewSubmitted": return "agent.reviewed";
+    case "PaymentPaid": return "payment.paid";
     default: return null;
   }
 }
 
 function eventObjectId(short: string, p: any): string {
-  return p.release_id ?? p.bounty_id ?? p.app_id ?? p.review_id ?? p.pr_id ?? p.repo_id ?? "";
+  return p.release_id ?? p.bounty_id ?? p.request_id ?? p.app_id ?? p.review_id ?? p.pr_id ?? p.repo_id ?? "";
 }
 
 function eventBlobIds(short: string, p: any): string[] {
@@ -219,8 +252,8 @@ function optionId(v: any): string | null {
 function reverifyAnchor(kind: string, row: any = {}) {
   return {
     network: NET,
-    packageId: kind === "app" ? PLAYGROUND_PACKAGE : PACKAGE,
-    objectId: row.id ?? row.objectId ?? row.release_id ?? row.bounty_id ?? row.app_id ?? row.review_id ?? null,
+    packageId: kind === "app" ? PLAYGROUND_PACKAGE : kind === "payment" ? WRITE_PACKAGE : PACKAGE,
+    objectId: row.id ?? row.objectId ?? row.release_id ?? row.bounty_id ?? row.request_id ?? row.app_id ?? row.review_id ?? null,
     txDigest: row.txDigest ?? row.tx ?? null,
     eventSeq: row.eventSeq ?? row.seq ?? null,
     blobIds: [
@@ -250,7 +283,7 @@ function enqueueWebhook(short: string, p: any, tx: string, seq: string) {
     payload: {
       event: eventType,
       network: NET,
-      packageId: short === "AppPublished" ? PLAYGROUND_PACKAGE : PACKAGE,
+      packageId: short === "AppPublished" ? PLAYGROUND_PACKAGE : short.startsWith("Payment") ? WRITE_PACKAGE : PACKAGE,
       objectId,
       txDigest: tx,
       eventSeq: seq,
@@ -382,6 +415,19 @@ function applyEvent(type: string, p: any, tx: string, seq: string) {
     case "AppBountyCancelled":
       db.prepare(`UPDATE app_bounties SET status=3 WHERE id=?`).run(p.bounty_id);
       break;
+    case "PaymentRequested":
+      up.paymentRequest.run({
+        id: p.request_id, creator: p.creator, recipient: p.recipient, label: p.label,
+        amount: Number(p.amount ?? 0), status: 0, payer: null,
+        created_at: Number(p.created_at_ms ?? 0), expires_at: optionId(p.expires_at_ms),
+      });
+      break;
+    case "PaymentPaid":
+      db.prepare(`UPDATE payment_requests SET status=1, payer=? WHERE id=?`).run(p.payer, p.request_id);
+      break;
+    case "PaymentCancelled":
+      db.prepare(`UPDATE payment_requests SET status=2 WHERE id=?`).run(p.request_id);
+      break;
   }
   const info = up.activity.run({ tx, seq, type: short, repo_id: repoId, json: JSON.stringify(p) }) as any;
   if ((info?.changes ?? 0) > 0) enqueueWebhook(short, p, tx, seq);
@@ -392,10 +438,12 @@ function applyEvent(type: string, p: any, tx: string, seq: string) {
 const MODULES = ["forge", "pull_request", "issue", "bounty", "release", "reputation"];
 const EVENT_SOURCES = [
   ...MODULES.map((module) => ({ key: module, packageId: PACKAGE, module })),
+  { key: "payment", packageId: WRITE_PACKAGE, module: "payment" },
   ...PLAYGROUND_EVENT_PKGS.map((packageId) => ({ key: `playground:${packageId}`, packageId, module: "playground" })),
 ];
 
 async function pollOnce() {
+  let ok = true;
   for (const src of EVENT_SOURCES) {
     try {
       const saved = db.prepare(`SELECT tx, seq FROM cursors WHERE module=?`).get(src.key) as { tx: string; seq: string } | undefined;
@@ -431,10 +479,15 @@ async function pollOnce() {
         if (!res.hasNextPage) break;
       } while (cursor);
     } catch (err: any) {
-      console.error(`poll ${src.key} failed:`, err.message ?? err);
+      ok = false;
+      lastPollError = String(err?.message ?? err);
+      pollErrorCount += 1;
+      await trackError(err, { component: "indexer", source: src.key });
     }
   }
   await flushWebhookQueue();
+  pollCount += 1;
+  if (ok) { lastPollOkAt = Date.now(); lastPollError = ""; }
 }
 
 async function flushWebhookQueue() {
@@ -474,6 +527,65 @@ async function flushWebhookQueue() {
 // ===== REST API =====
 
 const app = express();
+app.disable("x-powered-by");
+
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000);
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX ?? 600);
+const rateHits = new Map<string, { count: number; resetAt: number }>();
+
+function clientIp(req: express.Request) {
+  return String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || req.socket.remoteAddress || "unknown";
+}
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  if (process.env.CSP_REPORT_ONLY !== "0") {
+    res.setHeader(
+      "Content-Security-Policy-Report-Only",
+      "default-src 'none'; connect-src 'self' https:; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://esm.sh; frame-ancestors 'none'; base-uri 'self'; report-uri /csp-report",
+    );
+  }
+  res.on("finish", () => {
+    const route = req.route?.path ? String(req.route.path) : req.path;
+    const key = `${req.method} ${route}`;
+    const m = requestMetrics.get(key) ?? { count: 0, totalMs: 0, errors: 0 };
+    m.count += 1;
+    m.totalMs += Date.now() - start;
+    if (res.statusCode >= 500) m.errors += 1;
+    requestMetrics.set(key, m);
+    log(res.statusCode >= 500 ? "error" : "info", "http request", {
+      method: req.method, path: req.path, status: res.statusCode, ms: Date.now() - start,
+    });
+  });
+  next();
+});
+
+app.use((req, res, next) => {
+  if (RATE_LIMIT_MAX <= 0 || req.path === "/metrics" || req.path === "/health" || req.path === "/api/health") return next();
+  const ip = clientIp(req);
+  const now = Date.now();
+  const hit = rateHits.get(ip);
+  if (!hit || now > hit.resetAt) {
+    rateHits.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return next();
+  }
+  hit.count += 1;
+  if (hit.count > RATE_LIMIT_MAX) {
+    res.setHeader("Retry-After", String(Math.ceil((hit.resetAt - now) / 1000)));
+    return res.status(429).json({ error: "rate_limited", retryAfterMs: Math.max(0, hit.resetAt - now) });
+  }
+  next();
+});
+
+app.post("/csp-report", express.json({ type: ["application/csp-report", "application/reports+json", "application/json"], limit: "32kb" }), (req, res) => {
+  log("warn", "csp report", { body: req.body });
+  res.status(204).end();
+});
+
 app.use(express.json({ limit: "64kb" }));
 // This API is a REBUILDABLE CACHE, never the source of truth. Every row carries its
 // on-chain object id (`id`) plus Walrus blob ids (snapshot / source / artifact / report),
@@ -484,8 +596,20 @@ app.use((_req, res, next) => {
   next();
 });
 
+function cursorSnapshot() {
+  return db.prepare(`SELECT module, tx, seq, updated_at FROM cursors ORDER BY module`).all() as any[];
+}
+
+function cacheMeta() {
+  return {
+    cacheAgeMs: lastPollOkAt ? Date.now() - lastPollOkAt : null,
+    cursor: cursorSnapshot(),
+    partial: Boolean(lastPollError),
+  };
+}
+
 function gateway(res: express.Response, data: any, reverify: any = {}, status = 200) {
-  return res.status(status).json({ source: "indexer-cache", data, reverify });
+  return res.status(status).json({ source: "indexer-cache", ...cacheMeta(), data, reverify });
 }
 
 function missing(res: express.Response) {
@@ -581,6 +705,56 @@ app.post(["/verify", "/api/verify"], (req, res) => {
   return gateway(res, result, result.reverify);
 });
 
+app.get(["/schema", "/api/schema"], (_req, res) => {
+  const tables = [
+    "repos", "prs", "reviews", "issues", "bounties", "releases", "release_links",
+    "reputation", "activity", "apps", "app_bounties", "payment_requests", "cursors",
+    "webhook_subscriptions", "webhook_deliveries",
+  ];
+  const data = {
+    network: NET,
+    packageId: PACKAGE,
+    playgroundPackageId: PLAYGROUND_PACKAGE,
+    eventSources: EVENT_SOURCES,
+    tables: Object.fromEntries(tables.map((table) => [
+      table,
+      db.prepare(`PRAGMA table_info(${table})`).all(),
+    ])),
+  };
+  return gateway(res, data, { network: NET, packageId: PACKAGE });
+});
+
+app.get(["/sync-report", "/api/sync-report"], (_req, res) => {
+  const cursors = cursorSnapshot();
+  const rows = {
+    repos: (db.prepare(`SELECT COUNT(*) n FROM repos`).get() as any).n,
+    prs: (db.prepare(`SELECT COUNT(*) n FROM prs`).get() as any).n,
+    releases: (db.prepare(`SELECT COUNT(*) n FROM releases`).get() as any).n,
+    apps: (db.prepare(`SELECT COUNT(*) n FROM apps`).get() as any).n,
+    payments: (db.prepare(`SELECT COUNT(*) n FROM payment_requests`).get() as any).n,
+    activity: (db.prepare(`SELECT COUNT(*) n FROM activity`).get() as any).n,
+    webhookDeliveries: (db.prepare(`SELECT COUNT(*) n FROM webhook_deliveries`).get() as any).n,
+  };
+  const data = {
+    ...healthPayload(),
+    pollCount,
+    pollErrorCount,
+    cacheAgeMs: lastPollOkAt ? Date.now() - lastPollOkAt : null,
+    partial: Boolean(lastPollError),
+    eventSources: EVENT_SOURCES.map((s) => {
+      const cursor = cursors.find((c) => c.module === s.key) ?? null;
+      return {
+        ...s,
+        cursor,
+        cursorAgeMs: cursor?.updated_at ? Date.now() - Number(cursor.updated_at) : null,
+        lag: cursor ? "tracked" : "not-started",
+      };
+    }),
+    rows,
+  };
+  return gateway(res, data, { network: NET, packageId: PACKAGE, cursor: cursors });
+});
+
 app.get(["/apps", "/api/apps"], async (_req, res) => {
   const rows = db.prepare(`SELECT * FROM apps ORDER BY created_at DESC LIMIT 500`).all() as any[];
   const data = await hydrateApps(rows);
@@ -635,6 +809,53 @@ app.get(["/packages", "/api/packages"], (_req, res) => {
   return gateway(res, data, { network: NET, packageId: PACKAGE, txDigest: deployment.publishTx ?? null });
 });
 
+function classifyArtifact(label: string) {
+  const s = label.toLowerCase();
+  if (s.includes("model") || s.includes("weights")) return "model";
+  if (s.includes("dataset")) return "dataset";
+  if (s.includes("eval") || s.includes("benchmark")) return "eval";
+  if (s.includes("inference") || s.includes("receipt")) return "inference";
+  if (s.includes("ci") || s.includes("test") || s.includes("report")) return "ci";
+  if (s.includes("proof") || s.includes("attestation")) return "proof";
+  if (s.includes("source") || s.includes("snapshot")) return "source";
+  return "artifact";
+}
+
+app.get(["/artifacts", "/api/artifacts"], (_req, res) => {
+  const releases = db.prepare(`SELECT * FROM releases ORDER BY rowid DESC LIMIT 200`).all() as any[];
+  const reviews = db.prepare(`SELECT * FROM reviews ORDER BY rowid DESC LIMIT 200`).all() as any[];
+  const bounties = db.prepare(`SELECT * FROM bounties WHERE proof IS NOT NULL ORDER BY rowid DESC LIMIT 200`).all() as any[];
+  const data = [
+    ...releases.flatMap((r) => [
+      { artifactType: "source", blobId: r.source, label: "source snapshot", releaseId: r.id, repoId: r.repo_id, riskBadge: "trusted" },
+      { artifactType: "artifact", blobId: r.artifact, label: "build artifact", releaseId: r.id, repoId: r.repo_id, riskBadge: "trusted" },
+      { artifactType: classifyArtifact("test report"), blobId: r.report, label: "test report", releaseId: r.id, repoId: r.repo_id, riskBadge: "trusted" },
+    ]),
+    ...reviews.map((r) => ({
+      artifactType: classifyArtifact("review report"),
+      blobId: r.report_blob,
+      label: "review report",
+      prId: r.pr_id,
+      repoId: r.repo_id,
+      owner: r.reviewer,
+      riskBadge: "partial",
+    })),
+    ...bounties.map((b) => ({
+      artifactType: classifyArtifact(String(b.proof)),
+      blobId: b.proof,
+      label: "bounty proof",
+      repoId: b.repo_id,
+      owner: b.claimant,
+      riskBadge: b.status === 2 ? "trusted" : "partial",
+    })),
+  ].filter((a) => a.blobId);
+  return gateway(res, data.map((a) => ({ ...a, reverify: reverifyAnchor("artifact", { id: a.blobId, ...a }) })), {
+    network: NET,
+    packageId: PACKAGE,
+    blobIds: data.map((a) => a.blobId),
+  });
+});
+
 app.get(["/bounties", "/api/bounties"], (_req, res) => {
   const repo = db.prepare(`SELECT * FROM bounties ORDER BY rowid DESC LIMIT 500`).all() as any[];
   const appBounties = db.prepare(`SELECT * FROM app_bounties ORDER BY rowid DESC LIMIT 500`).all() as any[];
@@ -645,7 +866,36 @@ app.get(["/bounties", "/api/bounties"], (_req, res) => {
   return gateway(res, data, { network: NET, packageId: PACKAGE, objectIds: [...repo, ...appBounties].map((b) => b.id) });
 });
 
-const WEBHOOK_EVENTS = ["release.published", "bounty.claimed", "bounty.paid", "app.published", "agent.reviewed", "*"];
+app.get(["/payments", "/api/payments"], (_req, res) => {
+  const rows = db.prepare(`SELECT * FROM payment_requests ORDER BY created_at DESC LIMIT 500`).all() as any[];
+  const data = rows.map((p) => ({ ...p, reverify: reverifyAnchor("payment", p) }));
+  return gateway(res, data, { network: NET, packageId: PACKAGE, objectIds: rows.map((p) => p.id) });
+});
+
+app.get(["/payments/:id", "/api/payments/:id"], (req, res) => {
+  const row = db.prepare(`SELECT * FROM payment_requests WHERE id=?`).get(String(req.params.id)) as any | undefined;
+  if (!row) return missing(res);
+  return gateway(res, { ...row, reverify: reverifyAnchor("payment", row) }, reverifyAnchor("payment", row));
+});
+
+app.post(["/payments", "/api/payments"], (req, res) => {
+  const recipient = String(req.body?.recipient ?? "");
+  const label = String(req.body?.label ?? "Signet payment");
+  const amountMist = Number(req.body?.amountMist ?? 0);
+  if (!recipient || !amountMist || amountMist <= 0) {
+    return gateway(res, null, { note: "Body requires recipient and positive amountMist." }, 400);
+  }
+  return gateway(res, {
+    tx: {
+      packageId: deployment.latestPackageId ?? PACKAGE,
+      target: `${deployment.latestPackageId ?? PACKAGE}::payment::create_request`,
+      arguments: { recipient, label, amountMist, expiresAtMs: req.body?.expiresAtMs ?? null },
+    },
+    note: "Gateway cannot sign for users. Submit this transaction from the wallet/CLI SDK.",
+  }, { network: NET, packageId: deployment.latestPackageId ?? PACKAGE }, 202);
+});
+
+const WEBHOOK_EVENTS = ["release.published", "bounty.claimed", "bounty.paid", "app.published", "agent.reviewed", "payment.paid", "*"];
 
 app.get(["/webhooks", "/api/webhooks"], (_req, res) => {
   const data = (db.prepare(`SELECT id,event_type,target_url,active,created_at FROM webhook_subscriptions ORDER BY created_at DESC`).all() as any[]);
@@ -683,12 +933,68 @@ app.get(["/webhook-deliveries", "/api/webhook-deliveries"], (_req, res) => {
   return gateway(res, data, { network: NET });
 });
 
-app.get("/api/health", (_req, res) =>
-  res.status(ready ? 200 : 503).json({
-    ok: ready, package: PACKAGE, network: NET,
+function healthPayload() {
+  return {
+    ok: ready,
+    package: PACKAGE,
+    network: NET,
+    uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+    lastPollOkAt,
+    lastPollError: lastPollError || null,
     source: "indexer-cache",
-    reverify: "rebuildable cache — verify object ids on Sui RPC + blob ids on Walrus (chain is source of truth)",
-  }));
+    reverify: "rebuildable cache - verify object ids on Sui RPC + blob ids on Walrus (chain is source of truth)",
+  };
+}
+
+app.get(["/health", "/api/health"], (_req, res) =>
+  res.status(ready ? 200 : 503).json(healthPayload()));
+
+app.get(["/status", "/api/status"], (_req, res) => gateway(res, {
+  ...healthPayload(),
+  eventSources: EVENT_SOURCES.map((s) => ({
+    key: s.key,
+    packageId: s.packageId,
+    module: s.module,
+    cursor: db.prepare(`SELECT tx, seq, updated_at FROM cursors WHERE module=?`).get(s.key) ?? null,
+  })),
+  rows: {
+    repos: (db.prepare(`SELECT COUNT(*) n FROM repos`).get() as any).n,
+    prs: (db.prepare(`SELECT COUNT(*) n FROM prs`).get() as any).n,
+    releases: (db.prepare(`SELECT COUNT(*) n FROM releases`).get() as any).n,
+    apps: (db.prepare(`SELECT COUNT(*) n FROM apps`).get() as any).n,
+    payments: (db.prepare(`SELECT COUNT(*) n FROM payment_requests`).get() as any).n,
+  },
+}, { network: NET, packageId: PACKAGE }));
+
+app.get("/metrics", (_req, res) => {
+  const lines = [
+    "# HELP signet_indexer_ready Indexer readiness: 1 after first successful startup poll.",
+    "# TYPE signet_indexer_ready gauge",
+    `signet_indexer_ready{network="${NET}"} ${ready ? 1 : 0}`,
+    "# HELP signet_indexer_polls_total Total indexer poll loops.",
+    "# TYPE signet_indexer_polls_total counter",
+    `signet_indexer_polls_total{network="${NET}"} ${pollCount}`,
+    "# HELP signet_indexer_poll_errors_total Total poll errors.",
+    "# TYPE signet_indexer_poll_errors_total counter",
+    `signet_indexer_poll_errors_total{network="${NET}"} ${pollErrorCount}`,
+    "# HELP signet_indexer_cache_age_ms Milliseconds since the last fully successful poll.",
+    "# TYPE signet_indexer_cache_age_ms gauge",
+    `signet_indexer_cache_age_ms{network="${NET}"} ${lastPollOkAt ? Date.now() - lastPollOkAt : -1}`,
+    "# HELP signet_indexer_partial_sync Indexer partial-sync flag: 1 when the last poll had an error.",
+    "# TYPE signet_indexer_partial_sync gauge",
+    `signet_indexer_partial_sync{network="${NET}"} ${lastPollError ? 1 : 0}`,
+    "# HELP signet_http_requests_total HTTP requests by route.",
+    "# TYPE signet_http_requests_total counter",
+  ];
+  for (const [route, m] of requestMetrics) {
+    const safeRoute = route.replace(/"/g, "");
+    lines.push(`signet_http_requests_total{route="${safeRoute}"} ${m.count}`);
+    lines.push(`signet_http_request_errors_total{route="${safeRoute}"} ${m.errors}`);
+    lines.push(`signet_http_request_duration_ms_sum{route="${safeRoute}"} ${m.totalMs}`);
+  }
+  res.type("text/plain; version=0.0.4").send(lines.join("\n") + "\n");
+});
+
 app.get("/api/repos", (_req, res) => res.json(db.prepare(`SELECT * FROM repos`).all()));
 app.get("/api/repos/:id", (req, res) => {
   const repo = db.prepare(`SELECT * FROM repos WHERE id=?`).get(req.params.id);

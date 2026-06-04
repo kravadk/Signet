@@ -156,17 +156,63 @@ jobs:
         run: echo "SPONSOR_TEST_KEY present — (E2E hook reserved)"
 
   web:
-    name: Web (syntax)
+    name: Web (syntax + e2e)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install root deps
+        run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
       - name: Syntax-check web modules
         run: |
           set -euo pipefail
           for f in web/*.js; do node --check "$f"; done
+      - name: E2E - critical user flows with mock wallet/RPC
+        run: npm run test:e2e -- --project=chromium
+      - name: Coverage - app unit core
+        run: npm run coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+          if-no-files-found: ignore
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+  audit_readiness:
+    name: Mainnet/audit readiness (no deploy)
+    runs-on: ubuntu-latest
+    env:
+      RUN_STATIC_ANALYSIS: ${{ vars.RUN_STATIC_ANALYSIS || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify runbooks and threat checklist
+        run: node scripts/mainnet-readiness-check.mjs
+      - name: Static analysis hooks (env-gated)
+        if: ${{ env.RUN_STATIC_ANALYSIS == 'true' }}
+        run: |
+          set -euo pipefail
+          if compgen -G "contracts/**/*.sol" > /dev/null; then
+            echo "Solidity contracts found; run slither/solhint here."
+          else
+            echo "No Solidity contracts; Signet on-chain code is Move. Move build/tests run in the Move job."
+          fi
 
   docker:
     name: Docker build (compose)

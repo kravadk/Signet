@@ -32,6 +32,7 @@ import {
 } from "./forge-read.js";
 import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { loadDeployment } from "./sui.js";
+import { artifactRecord, type ArtifactType } from "./artifacts.js";
 
 // Runtime clock — fine here (not inside a workflow script).
 const nowMs = () => Date.now();
@@ -227,11 +228,11 @@ export async function verifyRelease(releaseId: string): Promise<VerifyResult> {
     if (pr) {
       chainOk = pr.repoId === rel.repoId && pr.status === 1 && pr.headSnapshot === rel.sourceSnapshot;
       reviewedOk = (pr.reviewRefs?.length ?? 0) > 0;
-      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}вЂ¦` +
+      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}…` +
         (chainOk ? " head == release source" : " does not match release source") +
-        (reviewedOk ? ` В· ${pr.reviewRefs.length} signed review(s)` : " В· no review");
+        (reviewedOk ? ` · ${pr.reviewRefs.length} signed review(s)` : " · no review");
     } else {
-      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}вЂ¦ not found`;
+      chainDetail = `ReleaseLinked PR ${rel.mergedPrId.slice(0, 10)}… not found`;
     }
   }
   if (!chainOk) try {
@@ -395,9 +396,17 @@ export async function reviewSubmit(args: {
   };
 }
 
-export async function artifactUpload(args: { content: string }) {
+export async function artifactUpload(args: { content: string; label?: string; artifactType?: ArtifactType }) {
   const blob = await storeBlobAuto(args.content);
-  return { blobId: blob.blobId, url: blobUrl(blob.blobId) };
+  return {
+    blobId: blob.blobId,
+    url: blobUrl(blob.blobId),
+    memory: artifactRecord({
+      blobId: blob.blobId,
+      label: args.label ?? "artifact",
+      artifactType: args.artifactType,
+    }),
+  };
 }
 
 // ===== Issues =====

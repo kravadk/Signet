@@ -8,6 +8,10 @@ import {
   verifyTreeHash,
   extractArchive,
   sha256,
+  merkleProof,
+  verifyMerkleProof,
+  computeMerkleRoot,
+  fileLeaf,
 } from "../src/lib/snapshot.ts";
 
 const files = [
@@ -61,4 +65,38 @@ test("parseManifest accepts a valid manifest and rejects an invalid one", () => 
   const round = parseManifest(JSON.stringify(manifest));
   assert.equal(round.treeHash, manifest.treeHash);
   assert.throws(() => parseManifest('{"name":"x"}'));
+});
+
+test("manifest carries a merkleRoot matching the file leaves", () => {
+  const { manifest } = buildSnapshotFromMemory({ ...opts, files });
+  assert.ok(manifest.merkleRoot);
+  assert.equal(manifest.merkleRoot, computeMerkleRoot(manifest.files.map(fileLeaf)));
+});
+
+test("merkleProof verifies inclusion for every file against the root", () => {
+  const { manifest } = buildSnapshotFromMemory({ ...opts, files });
+  for (const f of manifest.files) {
+    const proof = merkleProof(manifest, f.path);
+    assert.ok(proof, `proof for ${f.path}`);
+    assert.equal(verifyMerkleProof(proof!, manifest.merkleRoot!), true);
+  }
+});
+
+test("merkleProof returns null for a file not in the snapshot", () => {
+  const { manifest } = buildSnapshotFromMemory({ ...opts, files });
+  assert.equal(merkleProof(manifest, "nope.txt"), null);
+});
+
+test("a tampered proof (wrong sha256) fails verification", () => {
+  const { manifest } = buildSnapshotFromMemory({ ...opts, files });
+  const proof = merkleProof(manifest, "b.txt")!;
+  proof.sha256 = sha256(new TextEncoder().encode("forged"));
+  assert.equal(verifyMerkleProof(proof, manifest.merkleRoot!), false);
+});
+
+test("a proof does not verify against a different root", () => {
+  const a = buildSnapshotFromMemory({ ...opts, files });
+  const b = buildSnapshotFromMemory({ ...opts, files: [{ path: "b.txt", content: "BETA" }, files[1], files[2]] });
+  const proof = merkleProof(a.manifest, "b.txt")!;
+  assert.equal(verifyMerkleProof(proof, b.manifest.merkleRoot!), false);
 });

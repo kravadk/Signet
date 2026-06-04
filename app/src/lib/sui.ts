@@ -548,6 +548,48 @@ export async function cancelExpired(
   return sign(ctx, tx);
 }
 
+// ===== Payment links =====
+
+export async function createPaymentRequest(
+  ctx: ForgeContext,
+  args: { recipient: string; label: string; amountMist: number; expiresAtMs?: number | null },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::payment::create_request`,
+    arguments: [
+      tx.pure.address(args.recipient),
+      tx.pure.string(args.label),
+      tx.pure.u64(args.amountMist),
+      tx.pure.option("u64", args.expiresAtMs ?? null),
+      tx.object.clock(),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
+export async function payPaymentRequest(
+  ctx: ForgeContext,
+  args: { requestId: string; amountMist: number },
+) {
+  const tx = new Transaction();
+  const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(args.amountMist)]);
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::payment::pay`,
+    arguments: [tx.object(args.requestId), coin, tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+export async function cancelPaymentRequest(ctx: ForgeContext, args: { requestId: string }) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::payment::cancel`,
+    arguments: [tx.object(args.requestId)],
+  });
+  return sign(ctx, tx);
+}
+
 // ===== Scope bitflags (mirror of the Move constants) =====
 
 export const SCOPE_OPEN_PR = 1;

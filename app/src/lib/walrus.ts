@@ -17,8 +17,8 @@ export const WALRUS_TESTNET = {
 // Mainnet public services. Reads are free from the public aggregator. There is
 // NO free public mainnet publisher (writes spend real WAL+SUI, so public ones
 // require auth); mainnet blobs are written via the `walrus store` CLI instead.
-// The publisher URL here is a best-effort placeholder for the HTTP path and is
-// not expected to accept anonymous writes on mainnet.
+// This publisher URL documents the mainnet HTTP path only; Signet mainnet writes
+// use `walrus store` so they spend real WAL+SUI through the configured wallet.
 export const WALRUS_MAINNET = {
   publisher: "https://publisher.walrus-mainnet.walrus.space",
   aggregator: "https://aggregator.walrus-mainnet.walrus.space",

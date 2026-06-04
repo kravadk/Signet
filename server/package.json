@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --experimental-sqlite --import tsx watch src/index.ts",
     "start": "node --experimental-sqlite --import tsx src/index.ts",
+    "reindex": "node --experimental-sqlite scripts/reindex.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -18,6 +18,27 @@ const deployment = loadDeployment(NETWORK);
 const PACKAGE = deployment.packageId;
 const client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 
+export type ReadSource = "json-rpc" | "graphql" | "grpc" | "indexer-cache";
+export interface ReadSyncStatus {
+  source: ReadSource;
+  partial: boolean;
+  cursor: unknown;
+  error: string | null;
+  checkedAt: number;
+}
+
+const syncStatus: ReadSyncStatus = {
+  source: "json-rpc",
+  partial: false,
+  cursor: null,
+  error: null,
+  checkedAt: 0,
+};
+
+export function readSyncStatus(): ReadSyncStatus {
+  return { ...syncStatus };
+}
+
 /**
  * Paginate an event query across ALL pages (cursor loop) so lists aren't silently
  * capped at one page. `max` is a safety backstop against an unbounded log.
@@ -28,14 +49,29 @@ async function queryAllEvents(
 ): Promise<any[]> {
   const out: any[] = [];
   let cursor: any = null;
+  syncStatus.partial = false;
+  syncStatus.error = null;
+  syncStatus.cursor = null;
+  syncStatus.checkedAt = Date.now();
   do {
     let page;
-    try { page = await client.queryEvents({ query, cursor, limit: pageLimit, order }); }
-    catch { break; }
+    try {
+      page = await client.queryEvents({ query, cursor, limit: pageLimit, order });
+    } catch (e: any) {
+      syncStatus.partial = out.length > 0;
+      syncStatus.cursor = cursor;
+      syncStatus.error = String(e?.message ?? e);
+      syncStatus.checkedAt = Date.now();
+      throw new Error(
+        `Sui event scan did not fully sync (source=json-rpc, partial=${syncStatus.partial}, cursor=${JSON.stringify(cursor)}): ${syncStatus.error}`,
+      );
+    }
     out.push(...page.data);
     cursor = page.nextCursor;
     if (!page.hasNextPage || out.length >= max) break;
   } while (cursor);
+  syncStatus.cursor = cursor;
+  syncStatus.checkedAt = Date.now();
   return out;
 }
 

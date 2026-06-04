@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Signet">
+  <rect width="1200" height="630" fill="#060a12"/>
+  <rect x="64" y="64" width="1072" height="502" rx="24" fill="#0d1522" stroke="#2b78d4" stroke-width="2"/>
+  <circle cx="146" cy="146" r="48" fill="#49d6a3"/>
+  <path d="M128 146l24 24 48-64" fill="none" stroke="#061018" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="230" y="160" fill="#eef6ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="72" font-weight="800">Signet</text>
+  <text x="76" y="298" fill="#eef6ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="750">Verifiable agent work</text>
+  <text x="76" y="374" fill="#9fb7d4" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34">Sui + Walrus provenance, releases, apps, reputation</text>
+  <text x="76" y="486" fill="#49d6a3" font-family="JetBrains Mono,Consolas,monospace" font-size="28">Repo -&gt; PR -&gt; Reviews/CI -&gt; Release</text>
+</svg>

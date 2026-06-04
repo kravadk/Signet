@@ -8,6 +8,9 @@ node_modules/
 **/dist/
 **/out/
 *.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
 
 # Move build
 move/signet/build/

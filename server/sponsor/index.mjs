@@ -35,7 +35,7 @@ const RATE_LIMIT_PER_MIN = Number(process.env.RATE_LIMIT_PER_MIN || 15);
 const WALLET_RATE_LIMIT_PER_MIN = Number(process.env.WALLET_RATE_LIMIT_PER_MIN || 20);
 const IP_DAILY_LIMIT = Number(process.env.IP_DAILY_LIMIT || 250);
 const WALLET_DAILY_LIMIT = Number(process.env.WALLET_DAILY_LIMIT || 100);
-const DAILY_BUDGET_MIST = Number(process.env.DAILY_BUDGET_MIST || 1_000_000_000); // 1 SUI/day estimate
+const DAILY_BUDGET_MIST = Number(process.env.DAILY_BUDGET_MIST || 1_000_000_000); // 1 SUI/day issued gas budget
 const FUNCTION_DAILY_LIMITS = parseFunctionLimits(process.env.FUNCTION_DAILY_LIMITS || 'publish_app=25,publish_app_v2=25,publish_remix_v3=25,update_app=50,*=500');
 const SPONSOR_WRITE_MODE = (process.env.SPONSOR_WRITE_MODE || 'open').toLowerCase(); // open | allowlist | stake
 const ALLOWED_SENDERS = new Set((process.env.ALLOWED_SENDERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
@@ -202,6 +202,7 @@ async function sponsorDashboard() {
     network: NETWORK,
     gasCoins,
     balanceMist,
+    gasBudgetIssuedMist: metrics.spendEstimatedMist,
     spendEstimatedMist: metrics.spendEstimatedMist,
     dailyBudgetMist: DAILY_BUDGET_MIST,
     remainingBudgetMist: Math.max(0, DAILY_BUDGET_MIST - metrics.spendEstimatedMist),

@@ -10,12 +10,18 @@ import {
   short, formatAddress, isValidSuiAddress, isValidSuiObjectId, MIST, suiAmount,
   PR_STATUS, prStatusLabel, ISSUE_STATUS, issueStatusLabel,
   BOUNTY_STATUS, bountyStatusLabel,
-  $, fields, escapeHtml, withTimeout,
+  $, fields, escapeHtml, withTimeout, saveSettings,
+  decodeSuiError,
   SCOPE_OPEN_PR, SCOPE_REVIEW, SCOPE_RUN_CI, SCOPE_NAMES, scopeChips, scoreTier,
 } from './shared.js';
+import {
+  readGetObject, readMultiGetObjects, readQueryEvents,
+  readSourceLabel, readSourceSnapshot,
+} from './data-source.js';
+import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeletonCards, skeletonRows, skeletonList } from './ui.js';
 import {
-  wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor,
+  wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor, signAndRun, signAndRunCreated,
   resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr,
   actVouch, actSetApprovals, actOpenDispute, actResolveDispute, actImportFromGitHub,
 } from './wallet.js';
@@ -32,7 +38,7 @@ async function multiGet(ids, parse) {
   const out = [];
   for (let i = 0; i < ids.length; i += 50) {
     const batch = ids.slice(i, i + 50);
-    const objs = await sui.multiGetObjects({ ids: batch, options: { showContent: true } }).catch(() => []);
+    const objs = await withTimeout(readMultiGetObjects({ ids: batch, options: { showContent: true } }), 15000, 'objects');
     for (let j = 0; j < objs.length; j++) {
       const x = objs[j]?.data?.content?.fields ?? {};
       const r = parse(x, batch[j]);
@@ -51,7 +57,7 @@ function parseRepo(x, id) {
   };
 }
 async function getRepo(id) {
-  const obj = await sui.getObject({ id, options: { showContent: true } });
+  const obj = await readGetObject({ id, options: { showContent: true } });
   return parseRepo(fields(obj), id);
 }
 
@@ -61,8 +67,7 @@ async function queryAllEvents(query, { order = 'descending', max = 1000, pageLim
   const out = []; let cursor = null;
   do {
     let page;
-    try { page = await sui.queryEvents({ query, cursor, limit: pageLimit, order }); }
-    catch { break; }
+    page = await withTimeout(readQueryEvents({ query, cursor, limit: pageLimit, order }), 15000, 'events');
     out.push(...page.data);
     cursor = page.nextCursor;
     if (!page.hasNextPage || out.length >= max) break;
@@ -85,7 +90,7 @@ function parsePr(x, id) {
   };
 }
 async function getPullRequest(id) {
-  const obj = await sui.getObject({ id, options: { showContent: true } });
+  const obj = await readGetObject({ id, options: { showContent: true } });
   return parsePr(fields(obj), id);
 }
 
@@ -107,7 +112,7 @@ function parseRelease(x, id) {
   };
 }
 async function getRelease(id) {
-  const obj = await sui.getObject({ id, options: { showContent: true } });
+  const obj = await readGetObject({ id, options: { showContent: true } });
   return parseRelease(fields(obj), id);
 }
 
@@ -170,7 +175,7 @@ function parseIssue(x, id) {
   };
 }
 async function getIssue(id) {
-  const obj = await sui.getObject({ id, options: { showContent: true } });
+  const obj = await readGetObject({ id, options: { showContent: true } });
   return parseIssue(fields(obj), id);
 }
 
@@ -193,7 +198,7 @@ function parseBounty(x, id) {
   };
 }
 async function getBounty(id) {
-  const obj = await sui.getObject({ id, options: { showContent: true } });
+  const obj = await readGetObject({ id, options: { showContent: true } });
   return parseBounty(fields(obj), id);
 }
 
@@ -204,6 +209,41 @@ async function listAllBounties() {
   const bounties = await multiGet(ids, parseBounty);
   for (const b of bounties) Object.assign(b, meta.get(b.id) || {});
   return bounties;
+}
+
+function optValue(v) {
+  return v?.fields?.vec?.[0] ?? v?.vec?.[0] ?? (typeof v === 'string' || typeof v === 'number' ? v : null);
+}
+
+function parsePayment(x, id) {
+  if (x.amount === undefined) return null;
+  const expiresAt = Number(optValue(x.expires_at_ms) ?? 0) || null;
+  const closed = x.paid ? 1 : x.cancelled ? 2 : 0;
+  return {
+    id,
+    creator: x.creator,
+    recipient: x.recipient,
+    label: x.label || '',
+    amount: Number(x.amount),
+    status: closed || (expiresAt && expiresAt <= Date.now() ? 3 : 0),
+    payer: optValue(x.payer),
+    createdAt: Number(x.created_at_ms ?? 0),
+    expiresAt,
+  };
+}
+
+async function getPayment(id) {
+  const obj = await readGetObject({ id, options: { showContent: true } });
+  return parsePayment(fields(obj), id);
+}
+
+async function listAllPayments() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.writePackageId || CFG.packageId}::payment::PaymentRequested` });
+  const ids = data.map((e) => e.parsedJson?.request_id).filter(Boolean);
+  const meta = new Map(data.map((e) => [e.parsedJson?.request_id, { tx: e.id?.txDigest || '', ts: Number(e.timestampMs || 0) }]).filter(([id]) => id));
+  const payments = await multiGet(ids, parsePayment);
+  for (const p of payments) Object.assign(p, meta.get(p.id) || {});
+  return payments;
 }
 
 async function listReviewEvents() {
@@ -302,6 +342,30 @@ async function verifyTreeHashBrowser(manifest) {
   if (!manifest || !Array.isArray(manifest.files) || !manifest.treeHash) return false;
   const recomputed = await sha256Hex(manifest.files.map((e) => `${e.path}:${e.sha256}`).join('\n'));
   return recomputed === manifest.treeHash;
+}
+
+/** Build + verify a Merkle inclusion proof for one file, client-side. Mirrors
+ *  snapshot.ts: leaf = sha256("path:sha256"); parent = sha256(left+right); odd dup. */
+async function merkleVerifyBrowser(manifest, path) {
+  if (!manifest?.files || !manifest.merkleRoot) return null;
+  const idx = manifest.files.findIndex((f) => f.path === path);
+  if (idx < 0) return null;
+  let level = [];
+  for (const f of manifest.files) level.push(await sha256Hex(`${f.path}:${f.sha256}`));
+  let leaf = level[idx], i = idx; const siblings = [];
+  while (level.length > 1) {
+    const isRight = i % 2 === 1; const sib = isRight ? i - 1 : i + 1;
+    siblings.push({ hash: sib < level.length ? level[sib] : level[i], left: isRight });
+    const next = [];
+    for (let k = 0; k < level.length; k += 2) {
+      const L = level[k]; const R = k + 1 < level.length ? level[k + 1] : L;
+      next.push(await sha256Hex(L + R));
+    }
+    level = next; i = Math.floor(i / 2);
+  }
+  let h = leaf;
+  for (const s of siblings) h = s.left ? await sha256Hex(s.hash + h) : await sha256Hex(h + s.hash);
+  return { ok: h === level[0] && level[0] === manifest.merkleRoot, root: level[0], depth: siblings.length };
 }
 
 async function blobAvailableBrowser(blobId) {
@@ -466,7 +530,7 @@ function renderVerifyResult(host, result) {
 
 /** Per-module event counts + daily buckets for the chart + a flat feed. */
 async function listActivity() {
-  const mods = ['forge', 'pull_request', 'issue', 'bounty', 'release', 'reputation'];
+  const mods = ['forge', 'pull_request', 'issue', 'bounty', 'release', 'reputation', 'payment'];
   const perMod = {};
   let total = 0;
   const tsBuckets = new Map(); // epochMs(day) -> count
@@ -692,13 +756,14 @@ async function renderSponsorDashboard() {
       if (!r.ok) throw new Error('sponsor ' + r.status);
       return r.json();
     }), 6000, 'sponsor dashboard');
-    const pct = d.dailyBudgetMist ? Math.round((Number(d.spendEstimatedMist || 0) / Number(d.dailyBudgetMist)) * 100) : 0;
+    const issuedGasBudget = Number(d.gasBudgetIssuedMist ?? d.spendEstimatedMist ?? 0);
+    const pct = d.dailyBudgetMist ? Math.round((issuedGasBudget / Number(d.dailyBudgetMist)) * 100) : 0;
     el.innerHTML =
       '<div class="rep-item">' +
         '<div class="rep-meta" style="width:100%">' +
           '<div class="buy-row"><span class="k">Status :</span><span class="pill ' + (d.ok ? 'released' : 'closed') + '">' + (d.ok ? 'ready' : 'not ready') + '</span></div>' +
           '<div class="buy-row"><span class="k">Balance :</span><span class="v mono">' + suiAmount(Number(d.balanceMist || 0)) + ' SUI</span></div>' +
-          '<div class="buy-row"><span class="k">Spend today :</span><span class="v mono">' + suiAmount(Number(d.spendEstimatedMist || 0)) + ' / ' + suiAmount(Number(d.dailyBudgetMist || 0)) + ' SUI (' + pct + '%)</span></div>' +
+          '<div class="buy-row"><span class="k">Gas budget issued :</span><span class="v mono">' + suiAmount(issuedGasBudget) + ' / ' + suiAmount(Number(d.dailyBudgetMist || 0)) + ' SUI (' + pct + '%)</span></div>' +
           '<div class="buy-row"><span class="k">Rejected :</span><span class="v mono">' + Number(d.rejected || 0) + '</span></div>' +
           '<div class="buy-row"><span class="k">Rate-limit hits :</span><span class="v mono">' + Number(d.rateLimitHits || 0) + '</span></div>' +
           '<div class="buy-row"><span class="k">Write mode :</span><span class="v mono">' + escapeHtml(d.quotas?.writeMode || 'open') + '</span></div>' +
@@ -748,6 +813,19 @@ function statError(id) {
   if (el) el.innerHTML = '<span class="stat-err" title="failed to load — refresh to retry">—</span>';
 }
 
+function renderReadSourceBadge() {
+  const src = readSourceSnapshot();
+  const label = readSourceLabel();
+  const badgeTxt = $('netBadgeTxt');
+  if (badgeTxt) badgeTxt.textContent = `${CFG.network} · ${label}`;
+  const badge = $('netBadge');
+  if (!badge) return;
+  const other = CFG.network === 'mainnet' ? 'testnet' : 'mainnet';
+  const extra = src.lastError ? ` Last read error: ${src.lastError}` : '';
+  badge.classList.toggle('degraded', Boolean(src.degraded || src.partial));
+  badge.setAttribute('data-tip', `Sui ${CFG.network} · ${label} · click to switch to ${other}.${extra}`);
+}
+
 /* ============================================================
    Load everything live
    ============================================================ */
@@ -758,7 +836,7 @@ async function loadData() {
     $('pkgShort').textContent = CFG.network + ' — not deployed';
     const msg = '<div class="empty-state">Signet is not yet deployed on <b>' + CFG.network +
       '</b>. Switch to testnet (remove ?network=mainnet) or publish the package and fill its address.</div>';
-    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'packageTrust', 'issuesList', 'bountiesList', 'activityFeed', 'buyList', 'repList'].forEach((id) => { const el = $(id); if (el) el.innerHTML = msg; });
+    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'packageTrust', 'issuesList', 'bountiesList', 'paymentsList', 'activityFeed', 'buyList', 'repList'].forEach((id) => { const el = $(id); if (el) el.innerHTML = msg; });
     ['statRepos', 'statPrs', 'statReleases', 'ovTotal'].forEach((id) => { const el = $(id); if (el) el.textContent = '—'; });
     return;
   }
@@ -793,6 +871,7 @@ async function loadData() {
       });
     }
   }
+  renderReadSourceBadge();
   const ownerNet = $('ownerNet');
   if (ownerNet) ownerNet.textContent = 'Sui ' + CFG.network;
 
@@ -805,6 +884,7 @@ async function loadData() {
     setSkel('agentsGrid', skeletonCards(3));
     setSkel('issuesList', skeletonCards(2));
     setSkel('bountiesList', skeletonCards(2));
+    setSkel('paymentsList', skeletonCards(2));
     setSkel('activityFeed', skeletonList(5));
     setSkel('buyList', skeletonList(3));
     setSkel('repList', skeletonList(3));
@@ -815,18 +895,19 @@ async function loadData() {
   try {
     // withTimeout turns a hung fullnode into the same empty-state fallback as a
     // rejection, so a slow RPC can never leave a view spinning forever.
-    const [repos, prs, releases, reps, issues, bounties, activity, agentCaps, reviewEvents, vouchEvents, bountyEvents] = await Promise.all([
-      withTimeout(listRepos(), 15000, 'repos').catch(() => []),
-      withTimeout(listAllPullRequests(), 15000, 'prs').catch(() => []),
-      withTimeout(listAllReleases(), 15000, 'releases').catch(() => []),
-      withTimeout(listAllReputation(), 15000, 'reputation').catch(() => []),
-      withTimeout(listAllIssues(), 15000, 'issues').catch(() => []),
-      withTimeout(listAllBounties(), 15000, 'bounties').catch(() => []),
-      withTimeout(listActivity(), 15000, 'activity').catch(() => ({ perMod: {}, total: 0, tsBuckets: new Map(), feed: [] })),
-      withTimeout(listAgentCaps(), 15000, 'caps').catch(() => new Map()),
-      withTimeout(listReviewEvents(), 15000, 'reviews').catch(() => []),
-      withTimeout(listVouchEvents(), 15000, 'vouches').catch(() => []),
-      withTimeout(listBountyLifecycleEvents(), 15000, 'bounty lifecycle').catch(() => ({ claimed: [], submitted: [], paid: [] })),
+    const [repos, prs, releases, reps, issues, bounties, payments, activity, agentCaps, reviewEvents, vouchEvents, bountyEvents] = await Promise.all([
+      withTimeout(listRepos(), 15000, 'repos'),
+      withTimeout(listAllPullRequests(), 15000, 'prs'),
+      withTimeout(listAllReleases(), 15000, 'releases'),
+      withTimeout(listAllReputation(), 15000, 'reputation'),
+      withTimeout(listAllIssues(), 15000, 'issues'),
+      withTimeout(listAllBounties(), 15000, 'bounties'),
+      withTimeout(listAllPayments(), 15000, 'payments'),
+      withTimeout(listActivity(), 15000, 'activity'),
+      withTimeout(listAgentCaps(), 15000, 'caps'),
+      withTimeout(listReviewEvents(), 15000, 'reviews'),
+      withTimeout(listVouchEvents(), 15000, 'vouches'),
+      withTimeout(listBountyLifecycleEvents(), 15000, 'bounty lifecycle'),
     ]);
 
     // owner from first repo (owner card may be absent — guard each element)
@@ -870,6 +951,7 @@ async function loadData() {
     // nav counts for new tabs
     setNavCount('navIssueCount', issues.length);
     setNavCount('navBountyCount', bounties.length);
+    setNavCount('navPaymentCount', payments.length);
 
     // cache for the other views + render them
     STATE.repos = repos;
@@ -878,14 +960,21 @@ async function loadData() {
     STATE.reps = reps;
     STATE.issues = issues;
     STATE.bounties = bounties;
+    STATE.payments = payments;
     STATE.activity = activity;
     STATE.repoNameById = repoNameById;
     STATE.agentCaps = agentCaps;
     STATE.reviewEvents = reviewEvents;
     STATE.vouchEvents = vouchEvents;
     STATE.bountyEvents = bountyEvents;
-    STATE.reliability = await withTimeout(loadReliability(), 12000, 'reliability').catch(() => new Map());
+    try {
+      STATE.reliability = await withTimeout(loadReliability(), 12000, 'reliability');
+    } catch (e) {
+      STATE.reliability = new Map();
+      toast('Reliability ledger did not sync: ' + (e.message || e), { kind: 'error', action: { label: 'Retry', onClick: refresh } });
+    }
     STATE.loaded = true;
+    renderReadSourceBadge();
     renderReposView();
     renderPRsView('all');
     renderReleasesView();
@@ -893,6 +982,7 @@ async function loadData() {
     renderPackagesView();
     renderIssuesView();
     renderBountiesView();
+    renderPaymentsView();
     renderActivityView();
     renderVerifyView();
 
@@ -901,16 +991,18 @@ async function loadData() {
     document.dispatchEvent(new CustomEvent('wf:data-loaded'));
   } catch (err) {
     console.error('Signet load failed:', err);
+    renderReadSourceBadge();
+    const syncMsg = decodeSuiError(err).message;
     ['statRepos', 'statPrs', 'statReleases', 'ovTotal'].forEach(statError);
     $('delBody').innerHTML = '<tr><td colspan="5"><div class="empty-state err">Failed to reach Sui RPC.</div></td></tr>';
     $('buyList').innerHTML = '<div class="empty-state err">RPC unavailable.</div>';
     $('repList').innerHTML = '<div class="empty-state err">RPC unavailable.</div>';
     $('bars').innerHTML = '<div class="empty-state err" style="grid-column:1/-1">RPC unavailable.</div>';
     // Secondary list views also get an error state (else they stay on skeletons forever).
-    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'issuesList', 'bountiesList', 'activityFeed'].forEach((id) => {
-      const el = $(id); if (el) el.innerHTML = '<div class="empty-state err">Failed to reach Sui RPC.</div>';
+    ['reposGrid', 'prsList', 'releasesList', 'agentsGrid', 'issuesList', 'bountiesList', 'paymentsList', 'activityFeed'].forEach((id) => {
+      const el = $(id); if (el) el.innerHTML = '<div class="empty-state err">Data did not sync: ' + escapeHtml(syncMsg) + '</div>';
     });
-    toast('Failed to reach Sui RPC', { kind: 'error', action: { label: 'Retry', onClick: refresh } });
+    toast('Data did not sync: ' + syncMsg, { kind: 'error', action: { label: 'Retry', onClick: refresh } });
   }
 }
 
@@ -1058,6 +1150,7 @@ function wireAgentFilters() {
 const VIEW_TITLES = {
   dashboard: 'Dashboard', playground: 'Playground', repos: 'Repositories', prs: 'Pull Requests',
   releases: 'Releases', packages: 'Packages', agents: 'Agents', issues: 'Issues', bounties: 'Bounties',
+  payments: 'Payments',
   activity: 'Activity', verify: 'Verify', trust: 'Trust Model',
   walrus: 'Walrus Storage', mcp: 'MCP / Agents API', detail: 'Detail',
 };
@@ -1077,6 +1170,7 @@ function showView(name) {
     renderPlaygroundView();
     if (!_pgInit) { _pgInit = true; loadGallery(); }
   }
+  if (target === 'payments') renderPaymentsView();
 }
 
 /* ---------- Repositories view ---------- */
@@ -1159,7 +1253,15 @@ function renderReleasesView() {
       if (!b) return;
       b.textContent = res.pass ? '✓ ' + res.levelLabel : '✗ unverified';
       if (!res.pass) { b.style.color = 'var(--red)'; b.style.borderColor = 'rgba(241,91,76,.35)'; b.style.background = 'rgba(241,91,76,.08)'; }
-    }).catch(() => {});
+    }).catch((e) => {
+      const b = $('slsa-' + r.id);
+      if (!b) return;
+      b.textContent = 'verify failed';
+      b.title = e?.message || String(e);
+      b.style.color = 'var(--red)';
+      b.style.borderColor = 'rgba(241,91,76,.35)';
+      b.style.background = 'rgba(241,91,76,.08)';
+    });
   });
 }
 
@@ -1177,7 +1279,7 @@ function capMatchesScope(cap, scope) {
 async function loadReliability() {
   const m = new Map();
   if (!CFG.reliabilityLedger) return m;
-  const led = await sui.getObject({ id: CFG.reliabilityLedger, options: { showContent: true } });
+  const led = await readGetObject({ id: CFG.reliabilityLedger, options: { showContent: true } });
   const tableId = led?.data?.content?.fields?.records?.fields?.id?.id;
   if (!tableId) return m;
   let cursor = null;
@@ -1185,7 +1287,7 @@ async function loadReliability() {
     const page = await sui.getDynamicFields({ parentId: tableId, cursor });
     const ids = page.data.map((d) => d.objectId);
     if (ids.length) {
-      const objs = await sui.multiGetObjects({ ids, options: { showContent: true } });
+      const objs = await readMultiGetObjects({ ids, options: { showContent: true } });
       for (const o of objs) {
         const f = o.data?.content?.fields;
         if (!f) continue;
@@ -1332,6 +1434,7 @@ async function memoryVaultItems(addr) {
   }
   for (const v of s.vouches) items.push({ kind: 'Vouch', title: 'vouched by ' + short(v.voucher), objectId: v.repoId, tx: v.tx, repoId: v.repoId });
   for (const item of items) {
+    item.artifactType = artifactTypeLabel(item.kind);
     if (item.blob) item.ok = await blobAvailableBrowser(item.blob);
     else if (item.proof && !isValidSuiObjectId(item.proof)) item.ok = await blobAvailableBrowser(item.proof);
     else item.ok = true;
@@ -1369,6 +1472,7 @@ async function proveAgentWork(addr) {
           { const link = itemLink(i); return (
           '<div class="vstep ' + (i.ok ? 'ok' : 'bad') + '">' +
             '<span class="vmark">' + (i.ok ? '✓' : '✗') + '</span>' +
+            '<span class="tier-badge tier-verified">' + escapeHtml(i.artifactType || 'artifact') + '</span>' +
             '<span class="vlabel">' + escapeHtml(i.kind) + ' · ' + escapeHtml(i.title || short(i.objectId || i.tx)) + '</span>' +
             (link ? '<a class="vdetail mono link" target="_blank" rel="noreferrer" href="' + link.href + '">' + escapeHtml(link.label) + '</a>' : '<span class="vdetail mono">anchored</span>') +
           '</div>'); }).join('') +
@@ -1478,7 +1582,7 @@ function renderPackagesView() {
       '<section class="info-card"><h3>Maintainers</h3>' + (maintainers.length ? maintainers.map((m) => '<a class="link mono maint-row" target="_blank" rel="noreferrer" href="' + explorerAddress(m) + '">' + escapeHtml(nameOrShort(m)) + '</a>').join('') : '<p>No repository maintainers loaded yet.</p>') + '</section>' +
     '</div>' +
     '<h3 class="detail-h3">Verified releases</h3><div class="verify-steps" id="pkgReleaseChecks">' + releaseRows + '</div>';
-  // Resolve real on-chain dependencies (async; fills the placeholder).
+  // Resolve real on-chain dependencies (async; replaces the loading row).
   loadPackageDependencies(CFG.packageId).then((deps) => {
     const host = $('pkgDeps'); if (!host) return;
     if (!deps.length) { host.innerHTML = '<span class="market-pill">no external package deps</span>'; return; }
@@ -1586,6 +1690,173 @@ function bountyActions(b) {
     btns.push('<button class="btn-ghost pg-mini" data-act="resolve" data-bounty="' + b.id + '" data-repo="' + b.repoId + '" data-cap="' + cap + '">Resolve dispute</button>');
   }
   return btns.length ? '<div class="pg-card-actions">' + btns.join('') + '</div>' : '';
+}
+
+/* ---------- Payments view ---------- */
+function paymentStatusLabel(s) {
+  return ['open', 'paid', 'cancelled', 'expired'][s] || 'unknown';
+}
+
+function artifactTypeLabel(label) {
+  const s = String(label || '').toLowerCase();
+  if (s.includes('eval')) return 'eval';
+  if (s.includes('model')) return 'model';
+  if (s.includes('dataset')) return 'dataset';
+  if (s.includes('inference')) return 'inference';
+  if (s.includes('proof')) return 'proof';
+  if (s.includes('review') || s.includes('ci') || s.includes('report')) return 'ci';
+  return 'artifact';
+}
+
+function txPureOptionU64(tx, value) {
+  if (tx.pure.option) return tx.pure.option('u64', value ?? null);
+  return tx.pure.vector('u64', value == null ? [] : [value]);
+}
+
+function renderPaymentsView() {
+  const el = $('paymentsList');
+  if (!el) return;
+  const cmd = cmdPanel('Create a payment link',
+    'Wallet signs payment::create_request; gateway only indexes and re-verifies receipts.',
+    null,
+    STATE.wallet ? { label: '+ New payment', fn: actCreatePayment } : null);
+  if (!STATE.payments.length) {
+    el.innerHTML = cmd + '<div class="empty-state">No payment requests on-chain yet. Create one to get a shareable Sui payment link.</div>';
+    return;
+  }
+  el.innerHTML = cmd + STATE.payments.map((p) => {
+    const st = paymentStatusLabel(p.status);
+    const link = location.origin + location.pathname + '#payments:' + p.id;
+    return '<div class="repo-card">' +
+      '<div class="pr-card-top"><span class="pill ' + paymentPillClass(st) + '">' + st + '</span>' +
+        '<span class="bounty-amount mono" style="margin-left:auto">' + suiAmount(p.amount) + ' SUI</span></div>' +
+      '<div class="pr-title" title="' + escapeHtml(p.label || '(payment request)') + '">' + escapeHtml(p.label || '(payment request)') + '</div>' +
+      '<div class="repo-meta">' +
+        '<div><span class="k">Recipient</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.recipient) + '">' + short(p.recipient) + '</a></div>' +
+        '<div><span class="k">Payer</span><span class="mono">' + (p.payer ? short(p.payer) : '-') + '</span></div>' +
+        '<div><span class="k">Expires</span><span class="mono">' + (p.expiresAt ? new Date(p.expiresAt).toLocaleString() : 'never') + '</span></div>' +
+        '<div><span class="k">Request</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(p.id) + '">' + short(p.id) + '</a></div>' +
+        '<div><span class="k">Link</span><button class="link mono btn-link" data-copy-pay="' + escapeHtml(link) + '">' + short(link, 18, 10) + '</button></div>' +
+      '</div><div class="payment-qr" data-qr="' + escapeHtml(link) + '"><span class="loading-shimmer"></span></div>' + paymentActions(p) + '</div>';
+  }).join('');
+  el.querySelectorAll('[data-copy-pay]').forEach((b) => b.addEventListener('click', () => copyText(b.dataset.copyPay, 'Payment link')));
+  el.querySelectorAll('[data-pay-act]').forEach((b) => b.addEventListener('click', () => {
+    const p = STATE.payments.find((x) => x.id === b.dataset.payment);
+    if (!p) return;
+    if (b.dataset.payAct === 'pay') actPayPayment(p);
+    if (b.dataset.payAct === 'cancel') actCancelPayment(p);
+  }));
+  renderPaymentQrs(el);
+}
+
+function paymentPillClass(st) {
+  if (st === 'paid') return 'paid';
+  if (st === 'cancelled' || st === 'expired') return 'cancelled';
+  return 'open';
+}
+
+async function renderPaymentQrs(root) {
+  const targets = [...root.querySelectorAll('[data-qr]')];
+  if (!targets.length) return;
+  try {
+    const QRCode = await import('https://esm.sh/qrcode@1.5.4?bundle');
+    await Promise.all(targets.map(async (el) => {
+      const url = el.dataset.qr || '';
+      const svg = await QRCode.toString(url, {
+        type: 'svg',
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 132,
+        color: { dark: '#dfe9ff', light: '#09111f' },
+      });
+      el.innerHTML = '<div class="qr-box">' + svg + '</div><button class="btn-ghost pg-mini" data-copy-pay="' + escapeHtml(url) + '">Copy link</button>';
+      el.querySelector('[data-copy-pay]')?.addEventListener('click', () => copyText(url, 'Payment link'));
+    }));
+  } catch (e) {
+    targets.forEach((el) => { el.innerHTML = '<button class="btn-ghost pg-mini" data-copy-pay="' + escapeHtml(el.dataset.qr || '') + '">Copy link</button>'; });
+  }
+}
+
+function paymentActions(p) {
+  if (!STATE.wallet || p.status !== 0) return '';
+  const buttons = [];
+  if (STATE.wallet.address !== p.recipient) {
+    buttons.push('<button class="btn-ghost pg-mini" data-pay-act="pay" data-payment="' + p.id + '">Pay</button>');
+  }
+  if (STATE.wallet.address === p.creator || STATE.wallet.address === p.recipient) {
+    buttons.push('<button class="btn-ghost pg-mini" data-pay-act="cancel" data-payment="' + p.id + '">Cancel</button>');
+  }
+  return buttons.length ? '<div class="pg-card-actions">' + buttons.join('') + '</div>' : '';
+}
+
+function actCreatePayment() {
+  if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return; }
+  openModal({
+    title: 'Create payment link',
+    bodyHtml: '<label class="field"><span>Recipient</span><input id="payRecipient" value="' + escapeHtml(STATE.wallet.address) + '"></label>' +
+      '<label class="field"><span>Label</span><input id="payLabel" value="Signet payment"></label>' +
+      '<label class="field"><span>Amount SUI</span><input id="payAmount" type="number" min="0" step="0.001" value="0.1"></label>' +
+      '<label class="field"><span>Expires in hours</span><input id="payExpiresHours" type="number" min="0" step="1" value="0"></label>' +
+      '<button class="cmd-action" id="payCreateBtn" type="button">Sign & create</button>',
+    onMount(body) {
+      body.querySelector('#payCreateBtn')?.addEventListener('click', submitCreatePayment);
+    },
+  });
+}
+
+async function submitCreatePayment() {
+  try {
+    const btn = $('payCreateBtn');
+    if (btn?.dataset.busy === '1') return;
+    if (btn) { btn.dataset.busy = '1'; btn.disabled = true; }
+    const recipient = $('payRecipient')?.value?.trim() || '';
+    const label = $('payLabel')?.value?.trim() || 'Signet payment';
+    const amountMist = Math.floor(Number($('payAmount')?.value || 0) * MIST);
+    const expiresHours = Number($('payExpiresHours')?.value || 0);
+    const expiresAt = expiresHours > 0 ? Date.now() + Math.floor(expiresHours * 60 * 60 * 1000) : null;
+    if (!isValidSuiAddress(recipient) || amountMist <= 0) { toast('Enter a valid recipient and amount', { kind: 'error' }); return; }
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${CFG.writePackageId || CFG.packageId}::payment::create_request`,
+      arguments: [
+        tx.pure.address(recipient),
+        tx.pure.string(label),
+        tx.pure.u64(amountMist),
+        txPureOptionU64(tx, expiresAt),
+        tx.object.clock(),
+      ],
+    });
+    const res = await signAndRunCreated(tx, 'Payment request created', '::payment::PaymentRequest');
+    const id = res?.created?.[0];
+    if (id) copyText(location.origin + location.pathname + '#payments:' + id, 'Payment link');
+    closeModal();
+  } catch (e) {
+    toast('Payment request failed: ' + decodeSuiError(e).message, { kind: 'error' });
+  } finally {
+    const btn = $('payCreateBtn');
+    if (btn) { btn.dataset.busy = '0'; btn.disabled = false; }
+  }
+}
+
+window.__signetSubmitPayment = submitCreatePayment;
+
+async function actPayPayment(p) {
+  const tx = new Transaction();
+  const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(p.amount)]);
+  tx.moveCall({
+    target: `${CFG.writePackageId || CFG.packageId}::payment::pay`,
+    arguments: [tx.object(p.id), coin, tx.object.clock()],
+  });
+  await signAndRun(tx, 'Payment sent');
+}
+
+async function actCancelPayment(p) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CFG.writePackageId || CFG.packageId}::payment::cancel`,
+    arguments: [tx.object(p.id)],
+  });
+  await signAndRun(tx, 'Payment request cancelled');
 }
 
 /* ---------- Activity feed view ---------- */
@@ -1703,8 +1974,23 @@ async function showRepoDetail(repoId) {
       '<span class="tree-path">' + escapeHtml(f.path) + '</span>' +
       '<span class="tree-size mono">' + f.size + ' B</span>' +
       '<span class="tree-hash mono">' + (f.sha256 || '').slice(0, 8) + '</span>' +
+      (manifest.merkleRoot ? '<button class="tree-prove" data-prove="' + escapeHtml(f.path) + '" title="Merkle inclusion proof against the on-chain-anchored root">⛓ prove</button>' : '') +
     '</div>'
   ).join('');
+
+  // Merkle inclusion: prove a single file is in this snapshot, client-side,
+  // against manifest.merkleRoot (anchored on-chain via the source snapshot blob).
+  tree.querySelectorAll('[data-prove]').forEach((b) => b.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const path = b.dataset.prove; const old = b.textContent; b.textContent = '…';
+    try {
+      const r = await merkleVerifyBrowser(manifest, path);
+      b.textContent = r?.ok ? '✓ proven' : '✗ failed';
+      toast(r?.ok
+        ? `✓ "${path}" is included — Merkle root ${r.root.slice(0, 10)}…, ${r.depth}-deep proof`
+        : `Inclusion proof failed for "${path}"`, { kind: r?.ok ? 'success' : 'error' });
+    } catch (e) { b.textContent = old; toast('Proof error: ' + (e.message || e), { kind: 'error' }); }
+  }));
 
   // click a file -> show its content (decompress archive lazily)
   tree.querySelectorAll('.tree-row').forEach((row) => {
@@ -1733,7 +2019,7 @@ async function showRepoDetail(repoId) {
 
 /** Find the shared RepoReputation ledger for a repo (created in the RepoCreated tx). */
 async function findReputationLedger(repoId) {
-  const ev = await sui.queryEvents({
+  const ev = await readQueryEvents({
     query: { MoveEventType: `${CFG.packageId}::forge::RepoCreated` },
     limit: 100, order: 'descending',
   });
@@ -1926,6 +2212,7 @@ function buildSearchIndex() {
   for (const r of STATE.releases) idx.push({ kind: 'release', label: r.version, sub: short(r.id), go: () => { activateNav('releases'); showReleaseDetail(r.id); } });
   for (const i of STATE.issues) idx.push({ kind: 'issue', label: i.title || short(i.id), sub: short(i.id), go: () => activateNav('issues') });
   for (const b of STATE.bounties) idx.push({ kind: 'bounty', label: b.title || short(b.id), sub: short(b.id), go: () => activateNav('bounties') });
+  for (const p of STATE.payments) idx.push({ kind: 'payment', label: p.label || short(p.id), sub: short(p.id), go: () => activateNav('payments') });
   for (const a of STATE.reps) idx.push({ kind: 'agent', label: short(a.agent, 10, 6), sub: 'profile', go: () => { activateNav('agents'); showAgentDetail(a.agent); } });
   return idx;
 }
@@ -2007,7 +2294,8 @@ function openSettings() {
     `<div class="set-row"><div class="set-label"><b>Refresh interval</b><span>seconds</span></div>` +
       `<input type="number" min="10" style="width:80px" id="setInterval" value="${SETTINGS.refreshSeconds}"></div>` +
     toggle('reduceMotion', 'Reduce motion', 'minimise animations') +
-    '<div class="set-row" style="border:none"><div class="set-label"><span>Data source: JSON-RPC (GraphQL beta available via ?graphql=1)</span></div></div>';
+    '<div class="set-row" style="border:none"><div class="set-label"><b>Data source</b><span>' +
+      escapeHtml(readSourceLabel()) + ' (append ?graphql=1 or ?source=json-rpc)</span></div></div>';
   document.body.append(ov, panel);
   requestAnimationFrame(() => { ov.classList.add('shown'); panel.classList.add('shown'); });
   const close = () => { ov.classList.remove('shown'); panel.classList.remove('shown'); setTimeout(() => { ov.remove(); panel.remove(); }, 280); };
@@ -2033,7 +2321,7 @@ function openSettings() {
 /** Re-render all views from cached STATE (used after explorer/name changes). */
 function rerenderAll() {
   renderReposView(); renderPRsView('all'); renderReleasesView(); renderAgentsView(); renderPackagesView();
-  renderIssuesView(); renderBountiesView(); renderActivityView(); renderVerifyView();
+  renderIssuesView(); renderBountiesView(); renderPaymentsView(); renderActivityView(); renderVerifyView();
   renderPRTable('all');
   const repoNameById = STATE.repoNameById;
   renderReleases(STATE.releases, repoNameById); renderReputation(STATE.reps);

@@ -21,6 +21,9 @@ export {
   openDispute,
   resolveDispute,
   cancelExpired,
+  createPaymentRequest,
+  payPaymentRequest,
+  cancelPaymentRequest,
   SCOPE_OPEN_PR,
   SCOPE_REVIEW,
   SCOPE_RUN_CI,
@@ -67,8 +70,12 @@ export {
   verifyTreeHash,
   extractArchive,
   sha256,
+  fileLeaf,
+  computeMerkleRoot,
+  merkleProof,
+  verifyMerkleProof,
 } from "./lib/snapshot.js";
-export type { Manifest, FileEntry } from "./lib/snapshot.js";
+export type { Manifest, FileEntry, MerkleProof } from "./lib/snapshot.js";
 
 // ---- Walrus storage ----
 export {
@@ -80,3 +87,21 @@ export {
   walrusConfigFor,
 } from "./lib/walrus.js";
 export type { StoredBlob, WalrusConfig } from "./lib/walrus.js";
+
+// ---- Memory/artifact records ----
+export { artifactRecord, classifyArtifact } from "./lib/artifacts.js";
+export type { ArtifactType, MemoryArtifact } from "./lib/artifacts.js";
+
+// ---- Typed client facade ----
+export {
+  AgentClient,
+  BountyClient,
+  ForgeClient,
+  IssueClient,
+  PaymentClient,
+  PlaygroundClient,
+  ReleaseClient,
+  signetClients,
+  toSignetResult,
+} from "./clients.js";
+export type { ReadSource, ReverifyAnchor, SignetResult } from "./clients.js";

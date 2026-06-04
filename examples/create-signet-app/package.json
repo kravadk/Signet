@@ -1,0 +1,16 @@
+{
+  "name": "create-signet-app-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "doctor": "npm --prefix ../.. run dev:doctor",
+    "doctor:testnet": "npm --prefix ../.. run dev:doctor -- --profile testnet",
+    "doctor:localnet": "npm --prefix ../.. run dev:doctor -- --profile localnet",
+    "verify": "npm --prefix ../../app run forge -- verify --release",
+    "payments:help": "npm --prefix ../../app run forge -- --help"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.30.0",
+    "@signet/cli": "file:../../app"
+  }
+}

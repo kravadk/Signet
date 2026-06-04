@@ -1,0 +1,12 @@
+{
+  "name": "Signet",
+  "short_name": "Signet",
+  "description": "Verifiable agent work on Sui + Walrus.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060a12",
+  "theme_color": "#060a12",
+  "icons": [
+    { "src": "logo.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

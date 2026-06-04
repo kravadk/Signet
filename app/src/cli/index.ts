@@ -21,7 +21,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { storeBlobAuto, blobUrl, renewBlob } from "../lib/walrus.js";
-import { buildSnapshot } from "../lib/snapshot.js";
+import { buildSnapshot, merkleProof, verifyMerkleProof } from "../lib/snapshot.js";
 import {
   makeContext,
   createRepo,
@@ -44,7 +44,7 @@ import {
   SCOPE_BITS,
   CAP_PRESETS,
 } from "../lib/sui.js";
-import { findReputationLedger } from "../lib/forge-read.js";
+import { findReputationLedger, getRelease, fetchManifest } from "../lib/forge-read.js";
 
 interface ForgeState {
   network: string;
@@ -616,6 +616,28 @@ program
     const ctx = makeContext(NET);
     const res = await cancelExpired(ctx, { bountyId: opts.bounty, termsId: opts.terms });
     console.log(`✓ bounty reclaimed (expired)\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("prove-file")
+  .description("Prove a single file is included in a release (Merkle inclusion proof) — no full download")
+  .requiredOption("--release <id>", "Release object id")
+  .requiredOption("--path <p>", "file path inside the snapshot (e.g. sources/a.move)")
+  .action(async (opts) => {
+    const rel = await getRelease(opts.release);
+    if (!rel) { console.error(`release not found: ${opts.release}`); process.exit(1); }
+    const manifest = await fetchManifest(rel.sourceSnapshot);
+    if (!manifest) { console.error("source manifest unavailable on Walrus"); process.exit(1); }
+    if (!manifest.merkleRoot) { console.error("this release's manifest predates Merkle roots (re-publish to enable per-file proofs)"); process.exit(1); }
+    const proof = merkleProof(manifest, opts.path);
+    if (!proof) { console.error(`file not in release: ${opts.path}`); process.exit(1); }
+    const ok = verifyMerkleProof(proof, manifest.merkleRoot);
+    console.log(`file:        ${proof.path}`);
+    console.log(`sha256:      ${proof.sha256}`);
+    console.log(`merkle root: ${proof.root}`);
+    console.log(`proof depth: ${proof.siblings.length} sibling hash(es)`);
+    console.log(ok ? `\n✓ included in release ${opts.release}` : `\n✗ NOT included — proof failed`);
+    if (!ok) process.exit(2);
   });
 
 program.parseAsync(process.argv).catch((e) => {

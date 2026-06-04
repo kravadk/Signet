@@ -90,7 +90,7 @@
         const js = lookup(src);
         if (js == null) return tag;
         const keepType = /type\s*=\s*["']module["']/i.test(pre + post);
-        return `<script${keepType ? ' type="module"' : ''}>\n${js}\n</script>`;
+        return `<script${keepType ? ' type="module"' : ''}>\n${js}\n<\/script>`;
       });
       return html;
     }

@@ -15,9 +15,9 @@ const DEPLOYMENTS = {
     // Original package — existing repos/PRs/releases events + object types stay under
     // this id (event/type filters use it). WRITES go to the latest upgrade below.
     packageId: '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1',
-    // Latest upgrade (v11) — forge-module WRITES target this so new functions
-    // (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability, update_app_v2) resolve.
-    writePackageId: '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70',
+    // Latest upgrade (v12) — forge-module WRITES target this so new functions
+    // (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability, update_app_v2, payment::*) resolve.
+    writePackageId: '0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5',
     mvrName: '@signet/forge',
     mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02',
@@ -27,13 +27,14 @@ const DEPLOYMENTS = {
     // Upgraded package (playground + builder-reputation + moderation + remix-reputation
     // + versioning/update_app + handles/NameRegistry + Treasury/tip_app_v2 + app-bounties
     // + paid-fork set_fork_price/pay_to_fork + private apps set_private/seal_approve_app_owner) — Playground WRITES/calls.
-    playgroundPackageId: '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70',
+    playgroundPackageId: '0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5',
     // An event's type carries the package id of the UPGRADE that DEFINED its struct —
     // not the original module id. So AppPublished lives under the original pkg, but
     // BuilderScored/AppFlagged/NameClaimed/AppBounty*/AppForkPaid/AppPrivacySet live under later upgrade pkgs.
     // Event reads must query ALL historical playground packages and merge.
     playgroundEventPkg: '0x78ff7299034508b8581a9725d8c6d6bda86813fbdacc5bb8666c0789908b1fcd',
     playgroundEventPkgs: [
+      '0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5', // v12 (payment module)
       '0x23f46be14317fbd5c2cf5a8c6aade16886956bc9c6a7a84920d226e772408b70', // v11 (AppUpdatedV2 — version blob ids)
       '0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e', // v9 (private apps: AppPrivacySet)
       '0xb2054d83ea80eac464e9601e0c9a5e7a06920e0161ca4f313ec03c4d3c62a760', // v8 (paid-fork: ForkPriceSet/AppForkPaid)
@@ -164,6 +165,135 @@ export function withTimeout(promise, ms = 12000, label = 'request') {
   ]);
 }
 
+export function isUserRejectedError(e) {
+  const s = String(e?.message || e || '').toLowerCase();
+  return s.includes('reject') || s.includes('denied') || s.includes('cancel') ||
+    s.includes('user abort') || s.includes('user declined');
+}
+
+export function decodeSuiError(e) {
+  const raw = String(e?.message || e || 'Unknown error');
+  const lower = raw.toLowerCase();
+  let kind = 'error';
+  let message = raw;
+  if (isUserRejectedError(raw)) {
+    kind = 'rejected';
+    message = 'Signature rejected by user.';
+  } else if (lower.includes('timed out') || lower.includes('timeout')) {
+    kind = 'timeout';
+    message = raw;
+  } else if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to fetch') || lower.includes('rpc')) {
+    kind = 'rpc';
+    message = raw;
+  }
+
+  const move = raw.match(/MoveAbort\(.+,\s*(\d+)\)/i) ||
+    raw.match(/abort(?:ed)?(?: with code)?\s*(\d+)/i);
+  if (move) {
+    kind = 'move_abort';
+    const reason = signetAbortReason(raw, Number(move[1]));
+    message = reason ? `Contract aborted: ${reason}.` : `Contract aborted with code ${move[1]}.`;
+  }
+
+  const vm = raw.match(/VMVerificationOrDeserializationError|CommandArgumentError|ObjectNotFound|InsufficientGas|InsufficientCoinBalance/i);
+  if (vm) {
+    kind = vm[0].toLowerCase();
+    message = raw;
+  }
+  return { kind, message, raw };
+}
+
+function signetAbortReason(raw, code) {
+  const s = String(raw).toLowerCase();
+  const maps = {
+    playground: {
+      0: 'you already starred this app',
+      1: 'builders cannot star their own app',
+      2: 'amount must be greater than zero',
+      3: 'you already flagged this app',
+      4: 'only the app builder can do this',
+      5: 'handle is already taken',
+      6: 'handle is not owned by this wallet',
+      7: 'only the admin can do this',
+      8: 'only the bounty poster can do this',
+      9: 'bounty is already closed',
+      10: 'reward must be greater than zero',
+      11: 'app has no paid fork price set',
+      12: 'payment is below the fork price',
+      13: 'only the private app owner can decrypt this',
+      14: 'Seal identity does not match this app',
+      15: 'wallet is not an allowlisted workspace member',
+    },
+    forge: {
+      0: 'only the repository owner can do this',
+      1: 'agent is not allowed to merge',
+      2: 'capability belongs to a different repository',
+      3: 'agent capability is missing the required scope',
+      4: 'agent capability has expired',
+      5: 'repository name is already taken',
+      6: 'agent capability was revoked',
+      7: 'Seal identity does not match this repository',
+    },
+    bounty: {
+      0: 'only the bounty funder can do this',
+      1: 'bounty is not open',
+      2: 'bounty is not claimed',
+      3: 'only the claimant can do this',
+      4: 'bounty is already claimed',
+      5: 'amount must be greater than zero',
+      6: 'agent score is below the bounty minimum',
+      7: 'only bounty funder or claimant can open a dispute',
+      8: 'dispute is already resolved',
+      9: 'payout split is out of range',
+      10: 'dispute does not belong to this bounty',
+      11: 'proof is required before payout',
+      12: 'bounty has no deadline',
+      13: 'deadline has not passed',
+      14: 'terms object does not belong to this bounty',
+    },
+    pull_request: {
+      0: 'pull request belongs to a different repository',
+      1: 'pull request is not open',
+      2: 'base snapshot is stale',
+      3: 'not enough approvals to merge',
+    },
+    issue: {
+      0: 'issue belongs to a different repository',
+      1: 'only the issue author can close it',
+      2: 'issue is not open',
+    },
+    release: {
+      0: 'merged PR belongs to a different repository',
+      1: 'PR must be merged before release',
+    },
+    reputation: {
+      0: 'you cannot vouch for yourself',
+      1: 'you already vouched for this agent',
+      2: 'voucher score is too low',
+      100: 'score delta must be greater than zero',
+    },
+    payment: {
+      0: 'payment amount must be greater than zero',
+      1: 'payment is below the requested amount',
+      2: 'payment request is already paid or cancelled',
+      3: 'payment request has expired',
+      4: 'only the creator or recipient can cancel this payment request',
+    },
+  };
+  for (const [module, map] of Object.entries(maps)) {
+    if (s.includes(`::${module}`) || s.includes(`"${module}"`) || s.includes(` ${module}`)) return map[code] || null;
+  }
+  return null;
+}
+
+export function txErrorMessage(e) {
+  const d = decodeSuiError(e);
+  if (d.kind === 'rejected') return d.message;
+  if (d.kind === 'timeout') return 'Transaction confirmation timed out. Check explorer or retry after refresh.';
+  if (d.kind === 'rpc') return 'Sui RPC did not respond. Retry or switch network.';
+  return d.message;
+}
+
 /* ---------- Explorer + Walrus links (network- and explorer-setting-aware) ---------- */
 const NET = CFG.network; // 'testnet' | 'mainnet'
 // Suiscan: mainnet path is /mainnet, testnet is /testnet. SuiVision: mainnet has no
@@ -210,7 +340,7 @@ export function escapeHtml(s) {
 /* ---------- Shared, cached app state ---------- */
 export const STATE = {
   loaded: false,
-  repos: [], prs: [], releases: [], reps: [], issues: [], bounties: [],
+  repos: [], prs: [], releases: [], reps: [], issues: [], bounties: [], payments: [],
   reviewEvents: [], vouchEvents: [], bountyEvents: { claimed: [], submitted: [], paid: [] },
   activity: { perMod: {}, total: 0, tsBuckets: new Map(), feed: [] },
   repoNameById: new Map(),

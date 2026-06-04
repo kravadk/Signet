@@ -7,15 +7,16 @@
    it live, publish it on-chain (verifiable provenance), it lands
    in a public gallery with on-chain visits/stars and a remix graph.
 
-   Static SPA — no backend. LLM via BYOK (user's Anthropic key in
-   localStorage); callLLM() is abstracted so a sponsored proxy can
-   replace BYOK later without touching the UI.
+   Static SPA shell with optional backend services: hosted LLM proxy,
+   sponsor, portal, zkLogin salt/prover, plus direct Sui RPC and Walrus.
+   User settings stay local; provenance, apps, metrics and payments are
+   anchored through the chain/RPC-backed services.
    ============================================================ */
 
 import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import {
   CFG, SETTINGS, saveSettings, sui, STATE, $, short, escapeHtml, blobUrl, explorerObject, explorerAddress, suiAmount, MIST,
-  isValidSuiAddress,
+  isValidSuiAddress, withTimeout, decodeSuiError,
 } from './shared.js';
 import { toast, openModal, closeModal } from './ui.js';
 import {
@@ -39,10 +40,10 @@ async function pgEvents(structName, { limit = 200, order = 'descending' } = {}) 
   await Promise.all(PG_EVENT_PKGS.map(async (pkg) => {
     let cursor = null; let pages = 0; let count = 0;
     do {
-      const r = await sui.queryEvents({
+      const r = await withTimeout(sui.queryEvents({
         query: { MoveEventType: `${pkg}::playground::${structName}` },
         cursor, limit: Math.min(50, perPkgLimit - count), order,
-      }).catch(() => null);
+      }), 15000, `${structName} events`);
       if (!r?.data?.length) break;
       for (const e of r.data) {
         const k = `${e.id?.txDigest}:${e.id?.eventSeq}`;
@@ -61,7 +62,7 @@ const pgCall = (tx, fn, args) => tx.moveCall({ target: `${PG_PKG}::${fn}`, argum
 async function multiGetChunked(ids, options) {
   const out = [];
   for (let i = 0; i < ids.length; i += 50) {
-    const part = await sui.multiGetObjects({ ids: ids.slice(i, i + 50), options });
+    const part = await withTimeout(sui.multiGetObjects({ ids: ids.slice(i, i + 50), options }), 15000, 'playground objects');
     out.push(...part);
   }
   return out;
@@ -238,6 +239,32 @@ const pg = {
   cat: 'all',
   search: '',
 };
+const PG_DRAFT_KEY = 'wf.playground.draft';
+const PG_FLOW_KEY = 'wf.playground.flow';
+function saveDraft() {
+  try { sessionStorage.setItem(PG_DRAFT_KEY, $('pgInput')?.value || ''); } catch {}
+}
+function restoreDraft() {
+  try {
+    const draft = sessionStorage.getItem(PG_DRAFT_KEY);
+    const input = $('pgInput');
+    if (draft && input && !input.value) {
+      input.value = draft;
+      toast('Draft restored after refresh', { kind: 'info', timeout: 1800 });
+    }
+    const flow = sessionStorage.getItem(PG_FLOW_KEY);
+    if (flow) {
+      sessionStorage.removeItem(PG_FLOW_KEY);
+      toast('Previous build/publish flow was interrupted by refresh. Review the current on-chain state, then retry.', { kind: 'error', action: { label: 'Refresh', onClick: loadGallery } });
+    }
+  } catch {}
+}
+function markFlow(name) {
+  try {
+    if (name) sessionStorage.setItem(PG_FLOW_KEY, name);
+    else sessionStorage.removeItem(PG_FLOW_KEY);
+  } catch {}
+}
 
 /* Inject a CSP that allows inline (the apps are inline by design) but blocks all
    network egress — defense-in-depth on top of the iframe sandbox for untrusted
@@ -293,12 +320,12 @@ function previewHtml(spec) {
 /* Starter templates — categorized, with detailed prompts that steer the LLM
    toward a complete single-page app. Clicking one fills the prompt box. */
 const TEMPLATES = [
-  { label: 'DeFi dashboard', category: 'data', prompt: 'A DeFi portfolio dashboard: token balance cards with 24h change, an allocation donut chart, a sortable positions table, and a simple line chart of total value. Use mock data, a dark theme, and clean typography. Single self-contained HTML file with inline CSS/JS (no external libraries).' },
-  { label: 'NFT mint page', category: 'art', prompt: 'An NFT collection mint page: hero with collection art placeholder, live mint counter (e.g. 1240/5000), quantity stepper, a prominent Mint button with a fake wallet-connect state, rarity/traits preview grid, and a roadmap section. Polished web3 aesthetic, responsive, single self-contained HTML file with inline CSS/JS.' },
-  { label: 'DAO vote tool', category: 'tool', prompt: 'A DAO governance UI: list of proposals each with title, status (active/passed/failed), vote tallies as For/Against bars, quorum indicator, and Vote For / Vote Against buttons that update tallies client-side. Include a "Create proposal" modal. Mock data, clean governance aesthetic, single self-contained HTML file with inline CSS/JS.' },
+  { label: 'DeFi dashboard', category: 'data', prompt: 'A DeFi portfolio dashboard: token balance cards with 24h change, an allocation donut chart, a sortable positions table, and a simple line chart of total value. Drive balances from editable portfolio records entered by the user, use a dark theme, and clean typography. Single self-contained HTML file with inline CSS/JS (no external libraries).' },
+  { label: 'NFT mint page', category: 'art', prompt: 'An NFT collection mint page: hero with a collection artwork panel, live mint counter connected to component state, quantity stepper, a prominent Mint button with an interactive wallet status, rarity/traits preview grid, and a roadmap section. Polished web3 aesthetic, responsive, single self-contained HTML file with inline CSS/JS.' },
+  { label: 'DAO vote tool', category: 'tool', prompt: 'A DAO governance UI: list of proposals each with title, status (active/passed/failed), vote tallies as For/Against bars, quorum indicator, and Vote For / Vote Against buttons that update proposal records client-side. Include a "Create proposal" modal. Clean governance aesthetic, single self-contained HTML file with inline CSS/JS.' },
   { label: 'Arcade game', category: 'game', prompt: 'A small canvas arcade game (e.g. asteroid dodger or breakout) with start/pause, score, lives, increasing difficulty, keyboard + touch controls, and a game-over screen with restart. 60fps requestAnimationFrame loop. Single self-contained HTML file with inline CSS/JS, no assets.' },
   { label: 'Product landing', category: 'tool', prompt: 'A modern SaaS product landing page: sticky nav, hero with headline + CTA, three feature cards with icons, a pricing table (3 tiers), a testimonial, and a footer. Smooth scroll, subtle entrance animations, responsive, distinctive typography. Single self-contained HTML file with inline CSS/JS.' },
-  { label: 'Data visualizer', category: 'data', prompt: 'An interactive data visualizer: paste or load sample CSV/JSON, then render a bar chart and a line chart with hover tooltips and a metric selector dropdown. Pure SVG/canvas (no chart libraries), dark theme, responsive. Single self-contained HTML file with inline CSS/JS.' },
+  { label: 'Data visualizer', category: 'data', prompt: 'An interactive data visualizer: paste or import CSV/JSON, then render a bar chart and a line chart with hover tooltips and a metric selector dropdown. Pure SVG/canvas (no chart libraries), dark theme, responsive. Single self-contained HTML file with inline CSS/JS.' },
 ];
 
 /* ============================================================
@@ -336,7 +363,7 @@ export function renderPlaygroundView() {
           <span class="pg-dot"></span><span class="pg-dot"></span><span class="pg-dot"></span>
           <span class="pg-frame-title" id="pgPreviewTitle">live preview</span>
           <select class="pg-mini" id="pgStorage" title="where to store the app bytes on Walrus">
-            <option value="free">Free · temporary</option>
+            <option value="free">Free testnet epochs</option>
             <option value="paid">Paid · you own it (renewable)</option>
           </select>
           <select class="pg-mini" id="pgEpochs" title="how many Walrus storage epochs to pay for" style="display:none">
@@ -409,6 +436,14 @@ function setPreview(spec) {
   $('pgPublish').disabled = false;
 }
 
+if (typeof window !== 'undefined') {
+  window.__wfTestSetApp = (spec) => {
+    pg.current = spec;
+    pg.basePrompt = spec.prompt || 'test';
+    setPreview(spec);
+  };
+}
+
 /* ============================================================
    Build flow
    ============================================================ */
@@ -418,6 +453,7 @@ async function build(promptText) {
   if (!llm.apiKey && llm.mode === 'byok') { openSettings(); return; }
   if (llm.mode === 'proxy' && !(llm.proxyUrl || CFG.llmProxyUrl)) { toast('Set the proxy URL in LLM settings', { kind: 'error' }); openSettings(); return; }
   pg.busy = true;
+  markFlow('build');
   const sendBtn = $('pgSend'); sendBtn.disabled = true; sendBtn.textContent = 'Building…';
   pushMsg('user', escapeHtml(promptText));
   const thinking = pushMsg('bot', '<span class="pg-typing">building your app…</span>');
@@ -431,12 +467,14 @@ async function build(promptText) {
     if (!pg.basePrompt) pg.basePrompt = promptText;
     spec.prompt = pg.basePrompt;
     pg.current = spec;
+    try { sessionStorage.removeItem(PG_DRAFT_KEY); } catch {}
     thinking.innerHTML = `Built <b>${escapeHtml(spec.name)}</b> · <span class="pg-cat">${spec.category}</span>. Live preview ready → iterate or Publish.`;
     setPreview(spec);
   } catch (e) {
     thinking.innerHTML = `<span class="pg-err">${escapeHtml(String(e.message || e))}</span>`;
     toast('Build failed: ' + (e.message || e), { kind: 'error' });
   } finally {
+    markFlow(null);
     pg.busy = false; sendBtn.disabled = false; sendBtn.textContent = 'Build ⌘↵';
   }
 }
@@ -490,6 +528,8 @@ async function publish() {
     return;
   }
   const btn = $('pgPublish'); btn.disabled = true; btn.textContent = 'Publishing…';
+  pg.busy = true;
+  markFlow('publish');
   try {
     const nowEpochMs = Date.now();
     const { archive, manifest, treeHash } = await buildAppSnapshot(
@@ -585,6 +625,8 @@ async function publish() {
   } catch (e) {
     toast('Publish failed: ' + (e.message || e), { kind: 'error' });
   } finally {
+    pg.busy = false;
+    markFlow(null);
     btn.disabled = false; btn.textContent = 'Publish';
   }
 }
@@ -602,7 +644,7 @@ async function publishPrivate(spec, archive, manifest, treeHash, mode) {
     ? walrusPutSdk([{ bytes: new TextEncoder().encode(JSON.stringify(manifest)), identifier: 'manifest' }], epochs).then((m) => m.get('manifest'))
     : walrusPut(JSON.stringify(manifest));
 
-  // Step 1 — publish public metadata with a placeholder (empty) archive blob.
+  // Step 1 — publish public metadata with an empty bootstrap archive blob.
   const manifestBlob = await putManifest();
   const tx1 = new Transaction();
   const none = tx1.moveCall({ target: '0x1::option::none', typeArguments: ['0x2::object::ID'], arguments: [] });
@@ -648,10 +690,10 @@ export async function loadGallery() {
     const ids = [];
     let cursor = null; let pages = 0;
     do {
-      const ev = await sui.queryEvents({
+      const ev = await withTimeout(sui.queryEvents({
         query: { MoveEventType: `${PG_EVENT}::playground::AppPublished` },
         cursor, limit: 50, order: 'descending',
-      });
+      }), 15000, 'AppPublished events');
       for (const e of ev.data) { const id = e.parsedJson?.app_id; if (id) ids.push(id); }
       cursor = ev.nextCursor;
       if (!ev.hasNextPage) break;
@@ -678,6 +720,7 @@ export async function loadGallery() {
     [...new Set(pg.gallery.map((a) => a.builder))].forEach((a) => resolveName(a).then(() => renderGallery()));
   } catch (e) {
     grid.innerHTML = `<div class="empty-state">Gallery unavailable: ${escapeHtml(String(e.message || e))}<br><span class="pg-dim">(publish_app lands on-chain once the playground module is deployed)</span></div>`;
+    toast('Gallery did not sync: ' + decodeSuiError(e).message, { kind: 'error', action: { label: 'Retry', onClick: loadGallery } });
   }
 }
 
@@ -691,7 +734,7 @@ async function loadModeration() {
   try {
     for (const e of await pgEvents('AppFlagged', { order: 'ascending' })) { const j = e.parsedJson; if (j?.app_id) flags.set(j.app_id, Number(j.flags || 0)); }
     for (const e of await pgEvents('AppHidden', { order: 'ascending' })) { const j = e.parsedJson; if (j?.app_id) hidden.set(j.app_id, !!j.hidden); }
-  } catch { /* moderation events may not exist yet — treat as none */ }
+  } catch (e) { toast('Moderation status did not sync: ' + decodeSuiError(e).message, { kind: 'error' }); }
   for (const a of pg.gallery) {
     a.flags = flags.get(a.id) || 0;
     a.hidden = hidden.get(a.id) || false;
@@ -706,7 +749,7 @@ async function loadForkPrices() {
     for (const e of await pgEvents('ForkPriceSet', { order: 'ascending' })) {
       const j = e.parsedJson; if (j?.app_id) prices.set(j.app_id, Number(j.price || 0));
     }
-  } catch { /* paid-fork events may not exist yet on this network — treat as free */ }
+  } catch (e) { toast('Fork prices did not sync: ' + decodeSuiError(e).message, { kind: 'error' }); }
   for (const a of pg.gallery) a.forkPrice = prices.get(a.id) || 0;
 }
 
@@ -719,7 +762,7 @@ async function loadPrivacy() {
     for (const e of await pgEvents('AppPrivacySet', { order: 'ascending' })) {
       const j = e.parsedJson; if (j?.app_id) priv.set(j.app_id, !!j.private);
     }
-  } catch { /* privacy events may not exist yet on this network — treat as public */ }
+  } catch (e) { toast('Private app status did not sync: ' + decodeSuiError(e).message, { kind: 'error' }); }
   for (const a of pg.gallery) a.private = priv.get(a.id) || false;
 }
 
@@ -737,7 +780,7 @@ async function loadWorkspaceMembers() {
       const j = e.parsedJson; if (!j?.app_id || !j.member) continue;
       members.get(j.app_id)?.delete(String(j.member));
     }
-  } catch { /* workspace events may not exist until the v2 object is deployed */ }
+  } catch (e) { toast('Workspace members did not sync: ' + decodeSuiError(e).message, { kind: 'error' }); }
   pg.workspaces = members;
   const me = STATE.wallet?.address || '';
   for (const a of pg.gallery) {
@@ -793,6 +836,10 @@ export function renderGallery() {
         <span class="pg-stat" title="on-chain stars">★ ${a.stars}</span>
         ${a.tips ? `<span class="pg-stat" title="tips received">◈ ${suiAmount(a.tips)}</span>` : ''}
       </div>
+      <div class="pg-walrus" data-walrus="${a.id}">
+        <span>Walrus: checking</span>
+        <span>${SETTINGS.portalUrl ? 'portal configured' : 'portal optional'}</span>
+      </div>
       <div class="pg-card-actions">
         <button class="btn-primary pg-mini" data-act="open" data-app="${a.id}">Open ↗</button>
         <button class="btn-ghost pg-mini" data-act="share" data-app="${a.id}" title="copy a shareable, verifiable link to this app">🔗 Share</button>
@@ -811,6 +858,39 @@ export function renderGallery() {
       </div>
     </div>`).join('');
   renderWorkspaceActions(grid, apps);
+  renderWalrusStatuses(grid, apps);
+}
+
+async function blobReachable(blobId) {
+  if (!blobId) return false;
+  try {
+    let res = await fetch(blobUrl(blobId), { method: 'HEAD' });
+    if (res.ok) return true;
+    res = await fetch(blobUrl(blobId), { headers: { range: 'bytes=0-16' } });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function renderWalrusStatuses(grid, apps) {
+  for (const app of apps) {
+    const el = grid.querySelector(`[data-walrus="${app.id}"]`);
+    if (!el) continue;
+    Promise.all([blobReachable(app.manifestBlob), blobReachable(app.archiveBlob)]).then(([manifestOk, archiveOk]) => {
+      const siteObject = localStorage.getItem('wf.site.' + app.id);
+      const status = manifestOk && archiveOk ? 'available' : manifestOk || archiveOk ? 'partial' : 'unavailable';
+      el.classList.toggle('bad', status !== 'available');
+      el.innerHTML =
+        '<span>Walrus: ' + status + '</span>' +
+        '<span>manifest ' + (manifestOk ? 'ok' : 'missing') + '</span>' +
+        '<span>archive ' + (archiveOk ? 'ok' : 'missing') + '</span>' +
+        (siteObject ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(siteObject) + '">site ' + short(siteObject) + '</a>' : '<span>site optional</span>');
+    }).catch(() => {
+      el.classList.add('bad');
+      el.innerHTML = '<span>Walrus: status unavailable</span><span>retry refresh</span>';
+    });
+  }
 }
 
 function renderWorkspaceActions(grid, apps) {
@@ -987,7 +1067,9 @@ async function openLiveApp(id) {
   if (app.private) { openPrivateApp(app); return; }
   // Only record a visit when it's gas-free (sponsor configured) — otherwise "Open" would
   // pop a wallet signature for a read-only action, which is jarring.
-  if (STATE.wallet && SETTINGS.sponsorUrl) { recordVisit(id).catch(() => {}); }
+  if (STATE.wallet && SETTINGS.sponsorUrl) {
+    recordVisit(id).catch((e) => toast('Visit metric did not sync: ' + decodeSuiError(e).message, { kind: 'error' }));
+  }
   window.open(appViewerUrl(app), '_blank', 'noopener');
 }
 
@@ -1337,6 +1419,7 @@ async function publishAsWalrusSite(id) {
     const r = await signAndRunCreated(tx, 'Walrus Site created', '::site::Site');
     const siteId = r?.created?.[0];
     if (siteId) {
+      try { localStorage.setItem('wf.site.' + app.id, siteId); } catch {}
       const b36 = objectIdToBase36(siteId);
       openModal({
         title: 'Walrus Site created ✓',
@@ -1470,7 +1553,7 @@ async function loadHandles() {
   try {
     for (const e of await pgEvents('NameClaimed', { limit: 500, order: 'ascending' })) { const j = e.parsedJson; if (j?.owner && j?.name) map.set(j.owner, j.name); }
     for (const e of await pgEvents('NameReleased', { limit: 500, order: 'ascending' })) { const j = e.parsedJson; if (j?.owner && map.get(j.owner) === j.name) map.delete(j.owner); }
-  } catch {}
+  } catch (e) { toast('Handles did not sync: ' + decodeSuiError(e).message, { kind: 'error' }); }
   pg.handles = map;
 }
 
@@ -1504,12 +1587,16 @@ async function loadBounties() {
       const winner = f.winner?.fields?.vec?.[0] ?? (typeof f.winner === 'string' ? f.winner : null);
       return { id: o.data.objectId, poster: f.poster || '', description: f.description || '', reward, open: f.open, winner };
     }).filter(Boolean).filter((b) => b.open);
-  } catch { pg.bounties = []; }
+  } catch (e) {
+    pg.bounties = null;
+    toast('Bounties did not sync: ' + decodeSuiError(e).message, { kind: 'error', action: { label: 'Retry', onClick: () => loadBounties().then(renderBounties) } });
+  }
 }
 
 function renderBounties() {
   const root = $('pgBounties'); if (!root) return;
   if (!CFG.appBounties) { root.innerHTML = '<div class="empty-state">Bounties aren\'t available on this network yet.</div>'; return; }
+  if (pg.bounties == null) { root.innerHTML = '<div class="empty-state err">Bounties did not sync. Retry from the toast or refresh.</div>'; return; }
   if (!pg.bounties.length) { root.innerHTML = '<div class="empty-state">No open bounties yet — post the first one.</div>'; return; }
   root.innerHTML = pg.bounties.map((b) => {
     const mine = STATE.wallet && STATE.wallet.address === b.poster;
@@ -1537,7 +1624,7 @@ async function postBounty() {
       <input id="pgBDesc" placeholder="e.g. a metronome with tap-tempo">
       <label style="margin-top:8px">Reward (SUI) — escrowed on-chain until you award it</label>
       <input type="number" id="pgBAmt" min="0.01" step="0.01" value="1">
-      <div class="modal-actions"><button class="btn-ghost" id="pgBCancel">Cancel</button><button class="btn-primary" id="pgBGo">Escrow + post</button></div>`,
+      <div class="modal-actions"><button class="btn-ghost" id="pgBCancel">Cancel</button><button class="btn-primary" id="pgBGo">Sign &amp; submit</button></div>`,
     onMount(m) {
       m.querySelector('#pgBCancel').addEventListener('click', closeModal);
       m.querySelector('#pgBGo').addEventListener('click', async () => {
@@ -1548,7 +1635,14 @@ async function postBounty() {
         const tx = new Transaction();
         const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(Math.round(amt * MIST))]);
         pgCall(tx, 'playground::post_app_bounty', [tx.pure.string(desc.slice(0, 200)), coin, tx.object('0x6')]);
-        const r = await signAndRun(tx, `Bounty posted · ${amt} SUI`); if (r) { closeModal(); await loadBounties(); renderBounties(); }
+        const go = m.querySelector('#pgBGo');
+        go.disabled = true; go.textContent = 'Signing...';
+        try {
+          const r = await signAndRun(tx, `Bounty posted · ${amt} SUI`);
+          if (r) { closeModal(); await loadBounties(); renderBounties(); }
+        } finally {
+          go.disabled = false; go.textContent = 'Sign & submit';
+        }
       });
     },
   });
@@ -1705,13 +1799,19 @@ function openSettings() {
    ============================================================ */
 export function wirePlayground() {
   const root = $('view-playground'); if (!root) return;
+  restoreDraft();
+  window.addEventListener('beforeunload', (e) => {
+    if (!pg.busy) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
   root.addEventListener('click', (e) => {
     const t = e.target;
     if (t.id === 'pgSend') build($('pgInput').value);
     else if (t.id === 'pgSettings') openSettings();
     else if (t.id === 'pgPublish') publish();
     else if (t.id === 'pgPostBounty') postBounty();
-    else if (t.classList?.contains('pg-example')) { $('pgInput').value = t.dataset.prompt || t.textContent; $('pgInput').focus(); }
+    else if (t.classList?.contains('pg-example')) { $('pgInput').value = t.dataset.prompt || t.textContent; saveDraft(); $('pgInput').focus(); }
     else if (t.classList?.contains('pg-pill')) {
       root.querySelectorAll('.pg-pill').forEach((p) => p.classList.toggle('on', p === t));
       pg.filter = t.dataset.sort; renderGallery();
@@ -1744,6 +1844,7 @@ export function wirePlayground() {
     if (e.target.id === 'pgInput' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); build($('pgInput').value); }
   });
   root.addEventListener('input', (e) => {
+    if (e.target.id === 'pgInput') saveDraft();
     if (e.target.id === 'pgSearch') { pg.search = e.target.value; renderGallery(); }
   });
   root.addEventListener('change', (e) => {

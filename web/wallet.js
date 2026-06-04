@@ -12,9 +12,21 @@ import { toBase64, fromBase64 } from 'https://esm.sh/@mysten/sui@1.30.0/utils';
 import {
   CFG, SETTINGS, sui, STATE, $, short, suiAmount, escapeHtml,
   explorerAddress, SCOPE_OPEN_PR, SCOPE_REVIEW, withTimeout, CAP_PRESETS, scopeChips,
+  decodeSuiError, txErrorMessage,
 } from './shared.js';
+import { readGetBalance } from './data-source.js';
 import { toast, copyText, openModal, closeModal } from './ui.js';
 import { zkSignAndExecute, zkLogout } from './zklogin.js';
+import {
+  publishBalanceError,
+  publishBalanceLoaded,
+  publishBalanceLoading,
+  publishWalletAccountChanged,
+  publishWalletConnected,
+  publishWalletDisconnected,
+  publishWalletError,
+  publishWalletNetwork,
+} from './wallet-adapter.js';
 
 const LAST_WALLET = 'wf.wallet';
 
@@ -58,7 +70,9 @@ async function doConnect(w) {
     const account = res.accounts[0];
     if (!account) throw new Error('no account');
     STATE.wallet = { address: account.address, account, wallet: w };
+    publishWalletConnected({ wallet: w, account });
     localStorage.setItem(LAST_WALLET, w.name);
+    bindWalletEvents(w);
     toast(`Connected ${short(account.address)}`, { kind: 'success' });
     // Best-effort network-mismatch warning: if the account advertises chains and none
     // match the active network, txs will be rejected — tell the user how to fix it.
@@ -68,6 +82,7 @@ async function doConnect(w) {
     }
     await afterConnect();
   } catch (e) {
+    publishWalletError(e);
     toast('Connect failed: ' + (e?.message || e), { kind: 'error' });
   }
 }
@@ -80,11 +95,51 @@ export function disconnectWallet() {
     try { STATE.wallet?.wallet?.features?.['standard:disconnect']?.disconnect(); } catch {}
   }
   STATE.wallet = null;
+  publishWalletDisconnected('user disconnected');
   STATE.myCaps = { owner: new Map(), agent: new Map() };
   localStorage.removeItem(LAST_WALLET);
   renderConnect();
   document.dispatchEvent(new CustomEvent('wf:wallet-changed'));
   toast('Disconnected', { kind: 'info', timeout: 1500 });
+}
+
+let walletUnsub = null;
+function bindWalletEvents(w) {
+  if (walletUnsub) { try { walletUnsub(); } catch {} walletUnsub = null; }
+  const events = w.features?.['standard:events'];
+  if (!events?.on) return;
+  walletUnsub = events.on('change', ({ accounts, chains } = {}) => {
+    if (!STATE.wallet || STATE.wallet.wallet !== w) return;
+    const next = accounts?.[0] || STATE.wallet.account;
+    if (!next) {
+      STATE.wallet = null;
+      publishWalletDisconnected('wallet event disconnected');
+      STATE.myCaps = { owner: new Map(), agent: new Map() };
+      localStorage.removeItem(LAST_WALLET);
+      renderConnect();
+      document.dispatchEvent(new CustomEvent('wf:wallet-changed'));
+      toast('Wallet disconnected. Connect again to sign actions.', { kind: 'info' });
+      return;
+    }
+    if (next.address !== STATE.wallet.address) {
+      STATE.wallet.address = next.address;
+      STATE.wallet.account = next;
+      publishWalletAccountChanged({ wallet: w, account: next });
+      STATE.wallet.balance = null;
+      STATE.wallet.balanceError = false;
+      STATE.myCaps = { owner: new Map(), agent: new Map() };
+      renderConnect();
+      toast(`Wallet account changed to ${short(next.address)}. Reloading permissions...`, { kind: 'info' });
+      afterConnect();
+      return;
+    }
+    STATE.wallet.account = next;
+    const activeChains = chains || next.chains || [];
+    publishWalletNetwork(activeChains);
+    if (activeChains.length && !activeChains.includes(`sui:${CFG.network}`)) {
+      toast(`Wallet network is ${activeChains.join(', ').replace(/sui:/g, '')}; Signet is on ${CFG.network}. Switch wallet or app network before signing.`, { kind: 'error', timeout: 7000 });
+    }
+  });
 }
 
 async function afterConnect() {
@@ -97,12 +152,17 @@ async function afterConnect() {
 /* ---------- Balance ---------- */
 async function loadBalance() {
   try {
-    const b = await withTimeout(sui.getBalance({ owner: STATE.wallet.address }), 12000, 'balance');
+    publishBalanceLoading();
+    const b = await withTimeout(readGetBalance({ owner: STATE.wallet.address }), 12000, 'balance');
     STATE.wallet.balance = b.totalBalance;
     STATE.wallet.balanceError = false;
-  } catch {
+    publishBalanceLoaded(b.totalBalance);
+  } catch (e) {
     STATE.wallet.balance = null;
+    STATE.wallet.balanceErrorMessage = e?.message || String(e);
     STATE.wallet.balanceError = true; // distinguishes "failed to load" from "0" so the menu can offer retry
+    publishBalanceError(e);
+    toast('Balance did not load: ' + decodeSuiError(e).message, { kind: 'error', action: { label: 'Retry', onClick: loadBalance } });
   }
 }
 
@@ -127,7 +187,10 @@ export async function loadMyCaps() {
         }
         cursor = res.hasNextPage ? res.nextCursor : null;
       } while (cursor);
-    } catch (e) { console.warn('loadMyCaps', type, e); }
+    } catch (e) {
+      console.warn('loadMyCaps', type, e);
+      toast(`Could not load ${type} permissions: ${decodeSuiError(e).message}`, { kind: 'error', action: { label: 'Retry', onClick: loadMyCaps } });
+    }
   }
 }
 
@@ -247,7 +310,13 @@ export async function signAndRun(tx, okMsg) {
   // zkLogin users sign with their ephemeral key (sponsor-aware) instead of a wallet.
   if (STATE.wallet.zk) return zkSignAndExecute(tx, okMsg);
   const feat = STATE.wallet.wallet.features['sui:signAndExecuteTransaction'];
+  const chains = STATE.wallet.account?.chains || [];
+  if (chains.length && !chains.includes(`sui:${CFG.network}`)) {
+    toast(`Wallet is not on ${CFG.network}. Switch wallet network or app network before signing.`, { kind: 'error', timeout: 7000 });
+    return null;
+  }
   try {
+    toast('Waiting for wallet signature...', { kind: 'info', timeout: 1800 });
     const res = await feat.signAndExecuteTransaction({
       transaction: tx,
       account: STATE.wallet.account,
@@ -256,7 +325,10 @@ export async function signAndRun(tx, okMsg) {
     const digest = res.digest;
     // Authoritative result from the fullnode — a Move-aborted tx still lands on-chain
     // with status "failure", so we MUST check effects, not just that it executed.
-    const conf = await sui.waitForTransaction({ digest, options: { showEffects: true } });
+    toast('Transaction submitted. Waiting for chain confirmation...', { kind: 'info', tx: digest, timeout: 2500 });
+    const conf = res.effects?.status
+      ? res
+      : await withTimeout(sui.waitForTransaction({ digest, options: { showEffects: true } }), 45000, 'transaction confirmation');
     if (conf.effects?.status?.status === 'failure') {
       throw new Error(conf.effects.status.error || 'transaction aborted on-chain');
     }
@@ -264,7 +336,11 @@ export async function signAndRun(tx, okMsg) {
     document.dispatchEvent(new CustomEvent('wf:tx-done'));
     return res;
   } catch (e) {
-    toast('Tx failed: ' + (e?.message || e), { kind: 'error' });
+    const decoded = decodeSuiError(e);
+    toast('Tx failed: ' + txErrorMessage(e), {
+      kind: decoded.kind === 'rejected' ? 'info' : 'error',
+      action: decoded.kind === 'timeout' || decoded.kind === 'rpc' ? { label: 'Retry', onClick: () => signAndRun(tx, okMsg) } : undefined,
+    });
     return null;
   }
 }
@@ -275,41 +351,42 @@ export async function signAndRun(tx, okMsg) {
    value-free playground actions the sponsor allowlists. */
 export async function signAndRunSponsored(tx, okMsg) {
   if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return undefined; }
-  // zkLogin sessions have no wallet-standard features — they sign via zkSignAndExecute
-  // (reached through signAndRun's zk branch). Bail so the caller falls back to it.
   if (STATE.wallet.zk) return undefined;
   const sponsorUrl = SETTINGS.sponsorUrl;
   const signFeat = STATE.wallet.wallet.features?.['sui:signTransaction'];
-  if (!sponsorUrl || !signFeat) return undefined; // not configured → caller falls back
+  if (!sponsorUrl || !signFeat) return undefined;
   try {
     const kind = await tx.build({ client: sui, onlyTransactionKind: true });
-    const r = await fetch(sponsorUrl, {
+    const r = await withTimeout(fetch(sponsorUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ sender: STATE.wallet.address, txKindBytes: toBase64(kind) }),
-    });
+    }), 15000, 'sponsor');
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('sponsor ' + r.status)); }
     const { txBytes, sponsorSignature } = await r.json();
-    // Wallet signs the sponsor-built bytes verbatim (reconstructed, gas already set).
     const reTx = Transaction.from(fromBase64(txBytes));
+    toast('Waiting for wallet signature...', { kind: 'info', timeout: 1800 });
     const signed = await signFeat.signTransaction({ transaction: reTx, account: STATE.wallet.account, chain: `sui:${CFG.network}` });
-    const res = await sui.executeTransactionBlock({
+    const res = await withTimeout(sui.executeTransactionBlock({
       transactionBlock: txBytes,
       signature: [signed.signature, sponsorSignature],
       options: { showEffects: true },
-    });
-    // Executed but aborted on-chain → surface the error and DO NOT fall back to
-    // user-paid (it would just abort again). Return null so the caller skips fallback.
+    }), 45000, 'sponsored transaction');
     if (res.effects?.status?.status === 'failure') {
-      toast('Tx failed: ' + (res.effects.status.error || 'aborted on-chain'), { kind: 'error', tx: res.digest });
+      toast('Tx failed: ' + txErrorMessage(res.effects.status.error || 'aborted on-chain'), { kind: 'error', tx: res.digest });
       return null;
     }
-    await sui.waitForTransaction({ digest: res.digest });
-    toast(okMsg + ' · gas sponsored', { kind: 'success', tx: res.digest });
+    await withTimeout(sui.waitForTransaction({ digest: res.digest }), 45000, 'sponsored transaction confirmation');
+    toast(okMsg + ' - gas sponsored', { kind: 'success', tx: res.digest });
     document.dispatchEvent(new CustomEvent('wf:tx-done'));
     return res;
   } catch (e) {
-    toast('Sponsored tx unavailable (' + (e?.message || e) + ') — using your wallet', { kind: 'info', timeout: 2500 });
-    return undefined; // fall back to user-paid
+    const decoded = decodeSuiError(e);
+    if (decoded.kind === 'rejected') {
+      toast(txErrorMessage(e), { kind: 'info' });
+      return null;
+    }
+    toast('Sponsored tx unavailable (' + txErrorMessage(e) + ') - using your wallet', { kind: 'info', timeout: 3000 });
+    return undefined;
   }
 }
 
@@ -319,12 +396,16 @@ export async function signAndRunCreated(tx, okMsg, typeSuffix) {
   const res = await signAndRun(tx, okMsg);
   if (!res) return null;
   try {
-    const full = await sui.getTransactionBlock({ digest: res.digest, options: { showObjectChanges: true } });
-    const created = (full.objectChanges ?? [])
+    const changes = res.objectChanges ?? (await sui.getTransactionBlock({
+      digest: res.digest,
+      options: { showObjectChanges: true },
+    })).objectChanges ?? [];
+    const created = changes
       .filter((c) => c.type === 'created' && String(c.objectType).includes(typeSuffix))
       .map((c) => c.objectId);
     return { digest: res.digest, created };
-  } catch {
+  } catch (e) {
+    toast('Could not read created object ids: ' + decodeSuiError(e).message, { kind: 'error' });
     return { digest: res.digest, created: [] };
   }
 }
@@ -430,7 +511,11 @@ export async function actGrantAgent(repoId, ownerCapId) {
   }));
   // Expiry presets: epochs are ~24h on Sui, so add N to the current epoch.
   let curEpoch = 0;
-  try { curEpoch = Number((await sui.getLatestSuiSystemState()).epoch) || 0; } catch { /* offline → Never only */ }
+  try {
+    curEpoch = Number((await withTimeout(sui.getLatestSuiSystemState(), 12000, 'Sui system state')).epoch) || 0;
+  } catch (e) {
+    toast('Expiry presets did not load: ' + decodeSuiError(e).message + '. Using Never only.', { kind: 'error' });
+  }
   const expiryOptions = [
     { value: '0', label: 'Never' },
     { value: String(curEpoch + 7), label: '~7 days (7 epochs)' },

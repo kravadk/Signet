@@ -23,7 +23,7 @@
     "seed": "node --import tsx scripts/seed-network.mjs",
     "doctor": "tsx src/cli/index.ts doctor",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/snapshot.test.ts",
+    "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "tsc --noEmit",
     "pack:dry": "npm pack --dry-run"
   },

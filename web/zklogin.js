@@ -14,8 +14,9 @@ import {
   generateNonce, generateRandomness, getExtendedEphemeralPublicKey,
   jwtToAddress, genAddressSeed, getZkLoginSignature,
 } from 'https://esm.sh/@mysten/sui@1.30.0/zklogin';
-import { SETTINGS, sui, STATE } from './shared.js';
+import { SETTINGS, sui, STATE, withTimeout, decodeSuiError, txErrorMessage } from './shared.js';
 import { toast } from './ui.js';
+import { publishWalletConnected, publishWalletDisconnected, publishWalletError } from './wallet-adapter.js';
 
 const PENDING = 'wf.zk.pending';     // sessionStorage: ephemeral + randomness + maxEpoch across redirect
 const SESSION = 'wf.zk.session';     // localStorage: the active zkLogin session
@@ -35,27 +36,32 @@ export function zkSession() {
 export function zkLogout() {
   localStorage.removeItem(SESSION);
   if (STATE.wallet?.zk) STATE.wallet = null;
+  publishWalletDisconnected('zkLogin signed out');
   document.dispatchEvent(new CustomEvent('wf:wallet-changed'));
 }
 
 /** Step 1 — generate ephemeral key + nonce, redirect to Google. */
 export async function beginZkLogin() {
   if (!zkConfigured()) { toast('Set Google client id + salt + prover URLs in settings', { kind: 'error' }); return; }
-  const { epoch } = await sui.getLatestSuiSystemState();
-  const maxEpoch = Number(epoch) + 2;
-  const ephemeral = Ed25519Keypair.generate();
-  const randomness = generateRandomness();
-  const nonce = generateNonce(ephemeral.getPublicKey(), maxEpoch, randomness);
-  sessionStorage.setItem(PENDING, JSON.stringify({ secret: ephemeral.getSecretKey(), maxEpoch, randomness }));
-  const redirectUri = SETTINGS.zkRedirectUri || (location.origin + location.pathname);
-  const params = new URLSearchParams({
-    client_id: SETTINGS.zkGoogleClientId,
-    redirect_uri: redirectUri,
-    response_type: 'id_token',
-    scope: 'openid',
-    nonce,
-  });
-  location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  try {
+    const { epoch } = await withTimeout(sui.getLatestSuiSystemState(), 12000, 'Sui RPC');
+    const maxEpoch = Number(epoch) + 2;
+    const ephemeral = Ed25519Keypair.generate();
+    const randomness = generateRandomness();
+    const nonce = generateNonce(ephemeral.getPublicKey(), maxEpoch, randomness);
+    sessionStorage.setItem(PENDING, JSON.stringify({ secret: ephemeral.getSecretKey(), maxEpoch, randomness }));
+    const redirectUri = SETTINGS.zkRedirectUri || (location.origin + location.pathname);
+    const params = new URLSearchParams({
+      client_id: SETTINGS.zkGoogleClientId,
+      redirect_uri: redirectUri,
+      response_type: 'id_token',
+      scope: 'openid',
+      nonce,
+    });
+    location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  } catch (e) {
+    toast('zkLogin cannot start: ' + decodeSuiError(e).message, { kind: 'error' });
+  }
 }
 
 /** Step 2 — on redirect back, finish login if an id_token is in the URL fragment. */
@@ -70,7 +76,7 @@ export async function completeZkLoginFromRedirect() {
   try {
     const { secret, maxEpoch, randomness } = pending;
     const ephemeral = Ed25519Keypair.fromSecretKey(secret);
-    const saltRes = await fetch(SETTINGS.zkSaltUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jwt }) });
+    const saltRes = await withTimeout(fetch(SETTINGS.zkSaltUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jwt }) }), 15000, 'salt service');
     if (!saltRes.ok) throw new Error('salt: ' + ((await saltRes.json().catch(() => ({}))).error || saltRes.status));
     const { salt } = await saltRes.json();
     const payload = decodeJwt(jwt);
@@ -79,10 +85,10 @@ export async function completeZkLoginFromRedirect() {
     const aud = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud;
     const addressSeed = genAddressSeed(BigInt(salt), 'sub', payload.sub, aud).toString();
     const extendedEphemeralPublicKey = getExtendedEphemeralPublicKey(ephemeral.getPublicKey());
-    const proofRes = await fetch(SETTINGS.zkProverUrl, {
+    const proofRes = await withTimeout(fetch(SETTINGS.zkProverUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jwt, extendedEphemeralPublicKey, maxEpoch, jwtRandomness: randomness, salt, keyClaimName: 'sub' }),
-    });
+    }), 45000, 'zk prover');
     if (!proofRes.ok) throw new Error('prover: ' + ((await proofRes.json().catch(() => ({}))).error || proofRes.status));
     const proof = await proofRes.json();
     const session = { address, secret, maxEpoch, randomness, addressSeed, proof, sub: payload.sub };
@@ -92,6 +98,7 @@ export async function completeZkLoginFromRedirect() {
     toast('Signed in with Google ✓ — no wallet needed', { kind: 'success' });
     return true;
   } catch (e) {
+    publishWalletError(e);
     toast('zkLogin failed: ' + (e.message || e), { kind: 'error' });
     return false;
   }
@@ -105,6 +112,7 @@ function activateSession(s) {
     zk: true,
     wallet: { name: 'zkLogin (Google)' },
   };
+  publishWalletConnected({ wallet: STATE.wallet.wallet, account: STATE.wallet.account });
   document.dispatchEvent(new CustomEvent('wf:wallet-changed'));
 }
 
@@ -121,7 +129,11 @@ export async function restoreZkLogin() {
       toast('Your zkLogin session expires this epoch — sign out and back in to refresh it.', { kind: 'info', timeout: 6000 });
     }
     return true;
-  } catch { return false; }
+  } catch (e) {
+    publishWalletError(e);
+    toast('Could not restore zkLogin session: ' + decodeSuiError(e).message, { kind: 'error' });
+    return false;
+  }
 }
 
 /** Execute a tx as the zkLogin user. Sponsor-aware: if a sponsor URL is set, the
@@ -135,10 +147,10 @@ export async function zkSignAndExecute(tx, okMsg) {
     let sponsorSignature = null;
     if (SETTINGS.sponsorUrl) {
       const kind = await tx.build({ client: sui, onlyTransactionKind: true });
-      const r = await fetch(SETTINGS.sponsorUrl, {
+      const r = await withTimeout(fetch(SETTINGS.sponsorUrl, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sender: s.address, txKindBytes: toBase64(kind) }),
-      });
+      }), 15000, 'sponsor');
       if (!r.ok) throw new Error('sponsor: ' + ((await r.json().catch(() => ({}))).error || r.status));
       const j = await r.json();
       bytes = fromBase64(j.txBytes);
@@ -150,15 +162,19 @@ export async function zkSignAndExecute(tx, okMsg) {
     const { signature: userSignature } = await ephemeral.signTransaction(bytes);
     const zkSig = getZkLoginSignature({ inputs: { ...s.proof, addressSeed: s.addressSeed }, maxEpoch: s.maxEpoch, userSignature });
     const sigs = sponsorSignature ? [zkSig, sponsorSignature] : [zkSig];
-    const res = await sui.executeTransactionBlock({ transactionBlock: toBase64(bytes), signature: sigs, options: { showEffects: true } });
+    toast('Submitting zkLogin transaction...', { kind: 'info', timeout: 1800 });
+    const res = await withTimeout(sui.executeTransactionBlock({ transactionBlock: toBase64(bytes), signature: sigs, options: { showEffects: true } }), 45000, 'zkLogin transaction');
     // A Move-aborted tx still lands on-chain with status "failure" — surface it as an error.
     if (res.effects?.status?.status === 'failure') throw new Error(res.effects.status.error || 'transaction aborted on-chain');
-    await sui.waitForTransaction({ digest: res.digest });
+    await withTimeout(sui.waitForTransaction({ digest: res.digest }), 45000, 'zkLogin transaction confirmation');
     toast(okMsg + (sponsorSignature ? ' · gas sponsored' : ''), { kind: 'success', tx: res.digest });
     document.dispatchEvent(new CustomEvent('wf:tx-done'));
     return res;
   } catch (e) {
-    toast('zkLogin tx failed: ' + (e.message || e), { kind: 'error' });
+    const decoded = decodeSuiError(e);
+    toast('zkLogin tx failed: ' + txErrorMessage(e), {
+      kind: decoded.kind === 'rejected' ? 'info' : 'error',
+    });
     return null;
   }
 }

@@ -40,7 +40,7 @@ curl localhost:8788/health
 - `POST /sponsor` — body `{ sender, txKindBytes }` (base64 `onlyTransactionKind`)
   → `{ txBytes, sponsorSignature }`
 - `GET /health` → `{ ok, sponsor, network }`
-- `GET /dashboard` → balance, estimated spend, rejected calls, rate-limit hits and quotas
+- `GET /dashboard` → live balance, issued gas budget, rejected calls, rate-limit hits and quotas
 
 Client: build `await tx.build({ client, onlyTransactionKind: true })`, POST it, have the
 wallet sign the returned `txBytes`, then
