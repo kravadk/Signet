@@ -57,10 +57,25 @@ const IS_TEST = process.env.NODE_ENV === 'test';
 const priv = process.env.SPONSOR_PRIVATE_KEY || '';
 if (!IS_TEST) {
   if (!priv) { log('error', 'SPONSOR_PRIVATE_KEY not set'); process.exit(1); }
+  if (priv.includes('...') || !priv.startsWith('suiprivkey1')) {
+    log('error', 'SPONSOR_PRIVATE_KEY must be a real Sui private key exported by `sui keytool export`; do not use placeholders like suiprivkey1...');
+    process.exit(1);
+  }
   if (!ALLOWED_PACKAGES.length) { log('error', 'ALLOWED_PACKAGES not set'); process.exit(1); }
 }
 // In test mode the keypair/RPC may be absent — validateKind (the pure allowlist check) is still testable.
-const sponsor = priv ? Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(priv).secretKey) : null;
+let sponsor = null;
+if (priv) {
+  try {
+    sponsor = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(priv).secretKey);
+  } catch (e) {
+    log('error', 'SPONSOR_PRIVATE_KEY is not a valid exported Sui private key', {
+      hint: 'Paste the full suiprivkey1... value from `sui keytool export --key-identity <address>` with no spaces, quotes, ellipsis, or trailing punctuation.',
+      error: String(e?.message || e),
+    });
+    if (!IS_TEST) process.exit(1);
+  }
+}
 const SPONSOR_ADDR = sponsor ? sponsor.getPublicKey().toSuiAddress() : '0x0';
 const client = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 
