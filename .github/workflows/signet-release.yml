@@ -138,7 +138,7 @@ jobs:
       SIGNET_CURRENT_MANIFEST_BLOB: ${{ inputs.current_manifest_blob }}
       SIGNET_GITHUB_ARTIFACT_NAME: ${{ inputs.github_artifact_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download prepared release inputs
         if: ${{ inputs.github_artifact_name != '' }}

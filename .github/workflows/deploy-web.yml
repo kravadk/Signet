@@ -25,7 +25,7 @@ jobs:
     env:
       HAS_KEY: ${{ secrets.SUI_DEPLOY_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Skip notice (no key)
         if: ${{ env.HAS_KEY != 'true' }}
