@@ -1,0 +1,112 @@
+services:
+  - type: web
+    name: signet-llm-proxy
+    runtime: docker
+    dockerfilePath: ./server/llm-proxy/Dockerfile
+    dockerContext: ./server/llm-proxy
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
+        value: https://YOUR_VERCEL_DOMAIN
+      - key: RATE_LIMIT_PER_MIN
+        value: 20
+      - key: MAX_TOKENS
+        value: 8000
+
+  - type: web
+    name: signet-sponsor
+    runtime: docker
+    dockerfilePath: ./server/sponsor/Dockerfile
+    dockerContext: ./server/sponsor
+    envVars:
+      - key: SPONSOR_PRIVATE_KEY
+        sync: false
+      - key: SUI_NETWORK
+        value: testnet
+      - key: ALLOWED_PACKAGES
+        value: 0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5,0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e
+      - key: ALLOWED_ORIGIN
+        value: https://YOUR_VERCEL_DOMAIN
+      - key: GAS_BUDGET
+        value: 20000000
+      - key: RATE_LIMIT_PER_MIN
+        value: 15
+      - key: WALLET_RATE_LIMIT_PER_MIN
+        value: 20
+      - key: IP_DAILY_LIMIT
+        value: 250
+      - key: WALLET_DAILY_LIMIT
+        value: 100
+      - key: DAILY_BUDGET_MIST
+        value: 1000000000
+      - key: FUNCTION_DAILY_LIMITS
+        value: publish_app=25,publish_app_v2=25,publish_remix_v3=25,update_app=50,*=500
+      - key: SPONSOR_WRITE_MODE
+        value: open
+      - key: ALLOWED_SENDERS
+        value: ""
+      - key: STAKE_MIN_MIST
+        value: 0
+
+  - type: web
+    name: signet-salt
+    runtime: docker
+    dockerfilePath: ./server/salt/Dockerfile
+    dockerContext: ./server/salt
+    envVars:
+      - key: SALT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: ALLOWED_ORIGIN
+        value: https://YOUR_VERCEL_DOMAIN
+      - key: JWKS_URL
+        value: https://www.googleapis.com/oauth2/v3/certs
+      - key: ALLOWED_ISS
+        value: https://accounts.google.com,accounts.google.com
+
+  - type: web
+    name: signet-portal
+    runtime: docker
+    dockerfilePath: ./server/portal/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PUBLIC_ORIGIN
+        value: https://YOUR_PORTAL_SERVICE_DOMAIN
+      - key: SERVICES
+        value: llm-proxy=https://YOUR_LLM_SERVICE_DOMAIN,sponsor=https://YOUR_SPONSOR_SERVICE_DOMAIN,salt=https://YOUR_SALT_SERVICE_DOMAIN,indexer=https://YOUR_INDEXER_SERVICE_DOMAIN/api
+
+  - type: web
+    name: signet-indexer
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile.indexer
+    dockerContext: .
+    envVars:
+      - key: SUI_NETWORK
+        value: testnet
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000
+      - key: RATE_LIMIT_MAX
+        value: 600
+      - key: CSP_REPORT_ONLY
+        value: 1
+      - key: ERROR_TRACKING_DSN
+        sync: false
+
+  - type: web
+    name: signet-importer
+    runtime: docker
+    dockerfilePath: ./server/importer/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: FORGE_NETWORK
+        value: testnet
+      - key: ALLOWED_ORIGIN
+        value: https://YOUR_VERCEL_DOMAIN
+      - key: MAX_FILES
+        value: 2000
+      - key: EPOCHS
+        value: 30
+      - key: CLONE_TIMEOUT_MS
+        value: 60000
