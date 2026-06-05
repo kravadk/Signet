@@ -142,7 +142,7 @@ jobs:
 
       - name: Download prepared release inputs
         if: ${{ inputs.github_artifact_name != '' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.github_artifact_name }}
           path: .signet
