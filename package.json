@@ -2,7 +2,7 @@
   "name": "signet",
   "private": true,
   "type": "module",
-  "description": "Signet — agent-native release network + Playground on Sui + Walrus. Root orchestration.",
+  "description": "Signet - agent-native release network + Playground on Sui + Walrus. Root orchestration.",
   "scripts": {
     "stack:up": "docker compose up --build",
     "stack:down": "docker compose down",

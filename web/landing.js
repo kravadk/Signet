@@ -8,6 +8,15 @@ import { SuiClient, getFullnodeUrl } from 'https://esm.sh/@mysten/sui@1.30.0/cli
 /* Testnet ids (mirror web/shared.js). */
 const PKG = '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1';
 const PG_ORIG = '0x78ff7299034508b8581a9725d8c6d6bda86813fbdacc5bb8666c0789908b1fcd';
+const PG_EVENT_PKGS = [
+  '0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e',
+  '0xb2054d83ea80eac464e9601e0c9a5e7a06920e0161ca4f313ec03c4d3c62a760',
+  '0x77dcd2cf25f851770105282d48ea847e411c2043d6d894e8dee29eb16abcb33a',
+  '0x8a94e39a04a0deae876520499f3fcb3e241444483a128faace90a2556dd0c6fe',
+  '0x5b0435fd37e23babb10fed7b5447f5ace605672e1171adb2dc9ba95e041a5b29',
+  '0x8f1a795e6005b5b559c6fa82f10fc93eb5840dc4741ac2147f1c71ee8912cb4c',
+  PG_ORIG,
+];
 const AGG = 'https://aggregator.walrus-testnet.walrus.space';
 const SCAN = 'https://suiscan.xyz/testnet';
 const sui = new SuiClient({ url: getFullnodeUrl('testnet') });
@@ -39,6 +48,25 @@ async function countEvents(MoveEventType, { distinct = null, maxPages = 6, limit
   }
   return { n: seen ? seen.size : n, more };
 }
+async function queryMoveEventsAcross(types, { limit = 8, order = 'descending' } = {}) {
+  const rows = (await Promise.all(types.map(async (type) => {
+    try {
+      const r = await sui.queryEvents({ query: { MoveEventType: type }, limit, order });
+      return r.data;
+    } catch {
+      return [];
+    }
+  }))).flat();
+  const seen = new Set();
+  return rows
+    .filter((e) => {
+      const key = `${e.id?.txDigest ?? ''}:${e.id?.eventSeq ?? ''}:${e.type ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => Number(b.timestampMs || 0) - Number(a.timestampMs || 0));
+}
 function countUp(el, target, suffix) {
   if (reduceMotion) { el.textContent = target + suffix; return; }
   const dur = 900, t0 = performance.now();
@@ -54,11 +82,20 @@ async function loadStats() {
     ['stat-repos', `${PKG}::forge::RepoCreated`, {}],
     ['stat-releases', `${PKG}::release::ReleasePublished`, {}],
     ['stat-agents', `${PKG}::reputation::ReputationUpdated`, { distinct: 'agent' }],
-    ['stat-apps', `${PG_ORIG}::playground::AppPublished`, {}],
+    ['stat-apps', PG_EVENT_PKGS.map((pkg) => `${pkg}::playground::AppPublished`), { distinct: 'app_id' }],
   ];
   await Promise.all(jobs.map(async ([id, type, opts]) => {
     const el = $(id); if (!el) return;
-    try { const { n, more } = await countEvents(type, opts); countUp(el, n, more ? '+' : ''); }
+    try {
+      if (Array.isArray(type)) {
+        const events = await queryMoveEventsAcross(type, { limit: 50 });
+        const n = opts.distinct ? new Set(events.map((e) => e.parsedJson?.[opts.distinct]).filter(Boolean)).size : events.length;
+        countUp(el, n, events.length >= 50 ? '+' : '');
+        return;
+      }
+      const { n, more } = await countEvents(type, opts);
+      countUp(el, n, more ? '+' : '');
+    }
     catch { el.textContent = '—'; }
   }));
 }
@@ -69,7 +106,7 @@ const TICKER_SRC = [
   { type: `${PKG}::release::ReleasePublished`, label: 'Release', txt: (j) => esc(j.version || 'release') },
   { type: `${PKG}::pull_request::PrOpened`, label: 'PR', txt: (j) => esc((j.title || 'pull request').slice(0, 32)) },
   { type: `${PKG}::bounty::BountyPosted`, label: 'Bounty', txt: (j) => esc((j.title || 'bounty').slice(0, 28)) },
-  { type: `${PG_ORIG}::playground::AppPublished`, label: 'App', txt: (j) => esc(j.name || 'app') },
+  ...PG_EVENT_PKGS.map((pkg) => ({ type: `${pkg}::playground::AppPublished`, label: 'App', txt: (j) => esc(j.name || 'app') })),
 ];
 async function loadTicker() {
   const host = $('ticker'); if (!host) return;
@@ -169,7 +206,7 @@ async function inflateIndexHtml(archiveBlob) {
 async function loadApps() {
   const grid = $('appsGrid'); if (!grid) return;
   try {
-    const r = await sui.queryEvents({ query: { MoveEventType: `${PG_ORIG}::playground::AppPublished` }, limit: 18, order: 'descending' });
+    const r = { data: await queryMoveEventsAcross(PG_EVENT_PKGS.map((pkg) => `${pkg}::playground::AppPublished`), { limit: 12 }) };
     const ids = [...new Set(r.data.map((e) => e.parsedJson?.app_id).filter(Boolean))].slice(0, 10);
     if (!ids.length) { grid.innerHTML = '<p class="muted">No published apps yet.</p>'; return; }
     const objs = await sui.multiGetObjects({ ids, options: { showContent: true } });

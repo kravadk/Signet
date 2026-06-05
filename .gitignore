@@ -43,6 +43,16 @@ move/signet/upgrade-*
 # Scratch / backups (not part of the shipped project)
 web-next-backup/
 web-annotate/
+research/
+
+# Internal planning notes kept out of the public repo. Public docs stay tracked
+# under README.md, .github/, examples/ and service README files.
+docs/
+DEPLOY.md
+PROJECT_PLAN.md
+GITLAWB_MAPPING.md
+HACKATHON_RESEARCH.md
+IDEAS.md
 
 # OS / editor
 .DS_Store

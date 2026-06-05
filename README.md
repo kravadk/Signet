@@ -34,9 +34,13 @@ events — re-checkable by anyone, not a screenshot.
 - [CLI reference](#cli-reference)
 - [MCP server (agent-native)](#mcp-server-agent-native)
 - [SDK](#sdk)
+- [Read layer and data-source parity](#read-layer-and-data-source-parity)
+- [Payment links and invoices](#payment-links-and-invoices)
 - [Verify a release (SLSA-style)](#verify-a-release-slsa-style)
 - [Backend P0 services (optional)](#backend-p0-services-optional)
+- [Hosted Gateway + webhooks](#hosted-gateway--webhooks)
 - [Automation](#automation)
+- [Testing and quality gates](#testing-and-quality-gates)
 - [Why Sui + Walrus](#why-sui--walrus)
 - [What makes it different](#what-makes-it-different)
 - [Who it's for](#who-its-for)
@@ -110,6 +114,8 @@ on-chain object, not a screenshot.
 - **Releases** that bind a tag to a reviewed source + artifact + report.
 - **Issues**, **comments**, and **on-chain SUI escrow bounties** (post / claim / submit / approve
   / cancel), claim-gated by reputation.
+- **Payment links / invoices** with shared `PaymentRequest` objects, QR/copy links, paid /
+  cancelled / expired states, and `payment.paid` webhooks.
 - **CI agent** that fetches a snapshot, runs `sui move test`, and posts a signed review on-chain.
 
 ---
@@ -143,7 +149,8 @@ Reputation and permissions are **contract checks, not server policy**:
 
 ### Other niceties
 - **SuiNS** reverse-resolution: addresses render as their SuiNS name where one exists.
-- **GraphQL data source (beta)**: append `?graphql=1` to read via Sui GraphQL instead of JSON-RPC.
+- **GraphQL data source (beta)**: append `?graphql=1` to read events, objects and balances through
+  Sui GraphQL. JSON-RPC remains the reliable fallback and the UI shows the active/degraded source.
 
 ---
 
@@ -196,7 +203,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/signet/      Sui Move contracts (the trust layer) — 7 modules, 55 tests
+move/signet/      Sui Move contracts (the trust layer) - 8 modules, 65 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -205,22 +212,26 @@ move/signet/      Sui Move contracts (the trust layer) — 7 modules, 55 tests
     issue.move           Issues + comments
     bounty.move          On-chain SUI escrow bounties (post/claim/submit/approve/cancel)
     reputation.move      Per-repo AgentProfile counters (PRs/reviews/CI) + vouching
+    payment.move         Shared PaymentRequest invoices (create/pay/cancel) + receipts
     playground.move      PublishedApp (provenance, visits/stars/tips, remix lineage)
                          · StarRegistry · BuilderBoard (BuilderScored) · FlagRegistry
                          · NameRegistry (@handles) · Treasury (tip_app_v2 / withdraw_treasury)
                          · update_app (versioning) · publish_remix_v3 · AppBounty (post/award/cancel)
                          · ForkRegistry (set_fork_price / pay_to_fork) · PrivacyRegistry
                          · seal_approve_app_owner / seal_approve_app_member (Seal private apps)
-  tests/                 55 tests across forge + playground
+  tests/                 65 tests across forge + playground + payment
 
 app/                   TypeScript CLI + SDK + MCP server + CI worker
   src/lib/*.ts           walrus / snapshot / sui (PTBs) / forge-read / actions (verifyRelease)
+                         + typed artifact memory records
+  src/clients.ts         typed Signet clients: Forge/Release/Bounty/Playground/Agent/Issue/Payment
   src/cli/index.ts       14 commands (see CLI reference)
-  src/mcp/server.ts      MCP server (stdio) — 16 agent tools (see MCP reference)
+  src/mcp/server.ts      MCP server (stdio) - 22 tools incl. Sui primitives + dry-run
   src/ci/worker.ts       CI agent: snapshot → `sui move test` → report → on-chain review
 
 server/                Optional backends — NONE required by the web UI
-  src/index.ts           indexer: polls Move events → SQLite → /api/* (read accelerator)
+  src/index.ts           indexer/gateway: cursor-polls Move events into SQLite and serves /api/*
+                         with source/cache/cursor/partial metadata + webhooks
   llm-proxy/             Anthropic relay (no BYOK)
   sponsor/               sponsored-tx service (gas-free, value-free calls only)
   salt/                  zkLogin salt service (stateless HMAC salt from a verified JWT)
@@ -235,7 +246,10 @@ web/                   Static SPA — no backend, no build step (ES modules via 
   zklogin.js             Sign in with Google (zkLogin), sponsor-aware execution
   wallet.js              wallet-standard connect/sign (sponsored + zkLogin aware) + SuiNS
   viewer.html            renders a published app from Walrus + re-verifies its tree-hash
-  app.js                 reads Sui RPC + Walrus aggregator in-browser; verify/diff client-side
+  app.js                 reads Sui RPC/GraphQL + Walrus in-browser; verify/diff client-side
+                         + payment links / QR / package trust / provenance graph
+  data-source.js         read adapter: json-rpc / graphql / grpc-requested fallback
+  wallet-adapter.js      dApp Kit-style wallet/account/network state facade
   shared.js              per-network config (mirrors deployments.json), client, state
   ui.js / styles.css     toasts/modals + theme (Sui blue; Plus Jakarta Sans + JetBrains Mono)
 
@@ -278,7 +292,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 ### Contracts
 ```sh
 cd move/signet
-sui move test          # 55/55 pass
+sui move test          # 65/65 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
 
@@ -325,13 +339,18 @@ npm i -g @signet/cli && forge <command>   # or global `forge` / `signet`
 ## MCP server (agent-native)
 
 Agents drive Signet through an MCP server that signs with the **agent's own key**, bounded
-by the agent's on-chain `AgentCap`. 16 tools:
+by the agent's on-chain `AgentCap`. The current server exposes 22 tools:
 
-- **Read (no key):** `repo_list`, `repo_read_manifest`, `release_read`, `release_verify`,
-  `issue_list`, `bounty_list`, `agent_reputation`
-- **Write (need `FORGE_AGENT_KEY` + the matching cap scope):** `pr_create`, `review_submit`,
-  `artifact_upload`, `issue_create`, `issue_comment`, `bounty_claim`, `bounty_submit`,
-  `agent_vouch`, `app_publish` (agents publish Playground apps)
+- **Signet read (no key):** `repo_list`, `repo_read_manifest`, `release_read`, `release_verify`,
+  `issue_list`, `bounty_list`, `agent_reputation`.
+- **Sui primitives (read-only):** `sui_balance`, `sui_object`, `sui_tx`, `sui_events`.
+- **Testnet utility:** `sui_faucet_testnet` (disabled on mainnet).
+- **Manifest:** `signet_tool_manifest`.
+- **Write-like Signet tools:** `pr_create`, `review_submit`, `artifact_upload`, `issue_create`,
+  `issue_comment`, `bounty_claim`, `bounty_submit`, `agent_vouch`, `app_publish`.
+
+Write-like tools support `dryRun: true`, returning a structured plan without a key, upload or
+signature. Normal writes still require `FORGE_AGENT_KEY` and the matching on-chain cap/scope.
 
 `merge` and `release` are **absent by design** — an agent can never call them.
 
@@ -351,15 +370,60 @@ proving the agent cannot exceed its delegated permissions.
 The same primitives are importable from `@signet/cli/sdk`:
 
 ```ts
-import { makeContext, verifyRelease, listRepos } from "@signet/cli/sdk";
+import { makeContext, signetClients, verifyRelease, listRepos } from "@signet/cli/sdk";
 
 const ctx = makeContext("testnet");
 const repos = await listRepos(ctx);
 const result = await verifyRelease(ctx, releaseId);   // SLSA-style provenance check
 console.log(result.level, result.steps);
+
+const signet = signetClients(ctx);
+const payment = await signet.payment.create({
+  recipient: ctx.address,
+  label: "Starter invoice",
+  amountMist: 100_000_000,
+});
 ```
 
 (The package ships TypeScript and runs via `tsx`; import it from a `tsx`/bundler context.)
+
+---
+
+## Read layer and data-source parity
+
+The static SPA reads directly from Sui and Walrus, but the read path is now transport-aware:
+
+- `web/data-source.js` exposes `json-rpc`, `graphql`, and `grpc` request modes.
+- `?graphql=1` performs real GraphQL reads for events, objects and balances where the Sui
+  GraphQL schema supports the required shape.
+- `?grpc=1` is explicit about the browser gRPC gap and falls back to JSON-RPC.
+- The UI shows `Live RPC`, `GraphQL`, `Indexer cache`, or `Degraded` instead of silently hiding
+  partial data.
+- CLI/MCP-side event scans expose partial/cursor/error metadata instead of repeated first-page
+  polling or silent partial reads.
+
+JSON-RPC remains the reliable fallback until the Sui gRPC/GraphQL paths cover every production
+read with the same stability as the fullnode JSON-RPC API.
+
+---
+
+## Payment links and invoices
+
+`payment.move` adds an additive Signet-native payment layer:
+
+- `PaymentRequest` shared object with creator, recipient, label, amount, optional expiry, payer,
+  paid/cancelled flags and timestamps.
+- Events: `PaymentRequested`, `PaymentPaid`, `PaymentCancelled`.
+- PTB helpers and typed SDK client: `createPaymentRequest`, `payPaymentRequest`,
+  `cancelPaymentRequest`, `PaymentClient`.
+- Gateway endpoints: `GET/POST /payments`, `GET /payments/:id`.
+- Web UI: payment list, create modal, optional expiry, QR/copy link, pay/cancel actions, explorer
+  links, and explicit `open`, `paid`, `cancelled`, `expired` states.
+- Webhook event: `payment.paid` with network, object id, tx digest, event seq, amount, payer,
+  recipient and reverify anchors.
+
+Gateway `POST /payments` intentionally returns an unsigned transaction intent. The gateway never
+signs or moves user funds; wallets, CLI or SDK clients submit the payment transaction.
 
 ---
 
@@ -454,6 +518,48 @@ services, fund the sponsor wallet (keep it modest/rotatable), register a Google 
 
 ---
 
+## Hosted Gateway + webhooks
+
+The hosted gateway is the production-facing API layer backed by the indexer cache. All responses
+include cache/source metadata plus reverify anchors so clients can independently re-check the
+chain and Walrus state:
+
+- `GET /api/schema`
+- `GET /api/sync-report`
+- `GET /verify` / `POST /verify`
+- `GET /apps`, `GET /apps/:id`
+- `GET /agents`
+- `GET /packages`
+- `GET /bounties`
+- `GET/POST /payments`, `GET /payments/:id`
+- `GET/POST /webhooks`, `DELETE /webhooks/:id`
+
+Responses follow the shape:
+
+```json
+{
+  "source": "indexer-cache",
+  "cacheAgeMs": 1234,
+  "cursor": {},
+  "partial": false,
+  "data": {},
+  "reverify": {
+    "network": "testnet",
+    "packageId": "0x...",
+    "objectIds": ["0x..."],
+    "blobIds": ["..."],
+    "treeHashes": ["..."],
+    "txDigest": "..."
+  }
+}
+```
+
+Webhook payloads include `network`, `objectId`, `txDigest`, `eventSeq`, relevant Walrus blob ids
+and the same `reverify` anchors. `payment.paid` is supported alongside release, bounty, app and
+agent-review events.
+
+---
+
 ## Automation
 
 CI runs on every push/PR (Move tests, app typecheck + unit tests, server + web checks, Docker build).
@@ -472,6 +578,34 @@ Each active job **no-ops until its Secret is set** (Settings → Secrets and var
 repo stays green out of the box. Keys must be **testnet, funded, throwaway** — never a mainnet key.
 Manual one-offs: `forge renew --app <id>`, `npm run seed:gallery`, `bash scripts/deploy-walrus-site.sh`.
 GitHub release workflow contract and copy-paste YAML: [`.github/SIGNET-INTEGRATION.md`](.github/SIGNET-INTEGRATION.md).
+Mainnet/audit readiness is intentionally no-deploy: [`.github/MAINNET-RUNBOOK.md`](.github/MAINNET-RUNBOOK.md)
+and [`.github/SELF-AUDIT.md`](.github/SELF-AUDIT.md) are checked by `scripts/mainnet-readiness-check.mjs`.
+
+---
+
+## Testing and quality gates
+
+The repo keeps the proof suite visible. Current local acceptance after the ecosystem-gap pass:
+
+```sh
+npm --prefix app run typecheck
+npm --prefix app test                         # 17/17 incl. MCP stdio integration
+npm --prefix server run typecheck
+node --test server/salt/salt.test.mjs
+node --test server/sponsor/sponsor.test.mjs
+node --test server/portal/inliner.test.mjs
+sui move test --path move/signet              # 65/65
+npm run test:e2e                              # 14/14, desktop + mobile
+npm run coverage                              # text + html coverage report
+Get-ChildItem web -Filter *.js | ForEach-Object { node --check $_.FullName }
+node --experimental-sqlite server/scripts/reindex.mjs --dry-run
+```
+
+Playwright covers critical user flows with a mock wallet and mock RPC: anonymous navigation,
+wallet connect/disconnect, account/network changes, rejected signatures, RPC outage, GraphQL
+fallback/source badge, payment creation, and open/paid/cancelled/expired payment states.
+
+CI uploads coverage and Playwright reports as artifacts.
 
 ---
 
@@ -518,10 +652,10 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Tech stack
 
-- **Contracts:** Sui Move (edition 2024), 7 modules, 55 tests; Seal access policy.
+- **Contracts:** Sui Move (edition 2024), 8 modules, 65 tests; Seal access policy.
 - **Storage:** Walrus (HTTP publisher/aggregator on testnet; `@mysten/walrus` SDK for owned blobs).
-- **App layer:** TypeScript — CLI (commander), `@mysten/sui` SDK, MCP server (stdio), CI worker,
-  optional SQLite indexer.
+- **App layer:** TypeScript - CLI (commander), typed SDK clients, `@mysten/sui` SDK,
+  MCP server (stdio), CI worker, optional SQLite indexer/gateway.
 - **Web:** dependency-free static SPA — ES modules via esm.sh, `@mysten/sui@1.30.0`,
   `@mysten/wallet-standard`, `@mysten/walrus`, `@mysten/sui/zklogin`. No bundler, no build step.
 - **Onboarding services:** Node 18+ (mostly dependency-free) — LLM proxy, sponsor, salt.
@@ -542,10 +676,14 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 
 ## Project status
 
-- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps); 55/55 tests.
+- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps + payment links); 65/65 tests.
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
-- ✅ **Release network** + `verify` (3 surfaces) + MCP (16 tools) + CLI (14 commands).
+- ✅ **Release network** + `verify` (3 surfaces) + MCP (22 tools) + CLI (14 commands) + typed SDK clients.
+- ✅ **Payment links + hosted gateway**: `PaymentRequest` Move module, QR/copy payment UI,
+  paid/cancelled/expired states, `/payments` APIs, `payment.paid` webhooks and reverify anchors.
+- ✅ **Quality gates**: app tests 17/17 (incl. MCP stdio integration), server tests 14/14,
+  Move 65/65, Playwright 14/14, coverage and CI artifact uploads.
 - ✅ **Onboarding code** (LLM proxy, sponsor — E2E-tested on testnet; zkLogin + salt — salt
   unit-tested). Going live needs you to host the services + register a Google OAuth client + fund
   a sponsor wallet.
