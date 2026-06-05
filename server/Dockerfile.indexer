@@ -1,6 +1,6 @@
 # Signet indexer (events → SQLite → REST). node:18 glibc for node:sqlite.
 # BUILD CONTEXT = repo root.
-FROM node:18
+FROM node:22
 WORKDIR /app
 COPY server/package.json server/package-lock.json* ./server/
 RUN cd server && (npm ci || npm install)
