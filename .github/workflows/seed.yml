@@ -17,7 +17,7 @@ jobs:
     env:
       HAS_SEED_KEY: ${{ secrets.FORGE_SEED_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Skip notice (no key)
         if: ${{ env.HAS_SEED_KEY != 'true' }}
