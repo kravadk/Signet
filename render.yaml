@@ -2,6 +2,7 @@ services:
   - type: web
     name: signet-llm-proxy
     runtime: docker
+    plan: free
     dockerfilePath: ./server/llm-proxy/Dockerfile
     dockerContext: ./server/llm-proxy
     envVars:
@@ -17,6 +18,7 @@ services:
   - type: web
     name: signet-sponsor
     runtime: docker
+    plan: free
     dockerfilePath: ./server/sponsor/Dockerfile
     dockerContext: ./server/sponsor
     envVars:
@@ -52,6 +54,7 @@ services:
   - type: web
     name: signet-salt
     runtime: docker
+    plan: free
     dockerfilePath: ./server/salt/Dockerfile
     dockerContext: ./server/salt
     envVars:
@@ -69,6 +72,7 @@ services:
   - type: web
     name: signet-portal
     runtime: docker
+    plan: free
     dockerfilePath: ./server/portal/Dockerfile
     dockerContext: .
     envVars:
@@ -80,6 +84,7 @@ services:
   - type: web
     name: signet-indexer
     runtime: docker
+    plan: free
     dockerfilePath: ./server/Dockerfile.indexer
     dockerContext: .
     envVars:
@@ -97,6 +102,7 @@ services:
   - type: web
     name: signet-importer
     runtime: docker
+    plan: free
     dockerfilePath: ./server/importer/Dockerfile
     dockerContext: .
     envVars:
