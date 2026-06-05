@@ -20,4 +20,11 @@
 //
 // NOTE: `npm run gen:web-config` overwrites this file with localhost URLs for the
 // local Docker/dev stack — do NOT commit that output; production stays empty.
-window.__WF_CONFIG = {};
+window.__WF_CONFIG = {
+  sponsorUrl: 'https://signet-sponsor.onrender.com/sponsor',
+  portalUrl: 'https://signet-portal.onrender.com',
+  llmProxyUrl: 'https://signet-llm-proxy.onrender.com/llm',
+  zkSaltUrl: 'https://signet-salt.onrender.com/salt',
+  zkProverUrl: '',
+  zkGoogleClientId: '893414924200-4j28fh1986ru14enu1nm1h48r2ldq1k5.apps.googleusercontent.com',
+};
