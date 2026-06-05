@@ -23,7 +23,7 @@ jobs:
         if: ${{ env.HAS_SEED_KEY != 'true' }}
         run: echo "FORGE_SEED_KEY not set — add it in repo Secrets (testnet, funded) to enable keep-alive seeding."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: ${{ env.HAS_SEED_KEY == 'true' }}
         with:
           node-version: 20
