@@ -305,6 +305,39 @@ export function wireWallet() {
    Each: build Transaction → wallet sign+execute → wait → toast.
    ============================================================ */
 
+/* Mid-flow refresh recovery: between "submitted" and "confirmed" we only have a
+   digest, not an outcome. Persist it so a page refresh during that window can
+   still surface the real result instead of silently losing the transaction. */
+const PENDING_TX_KEY = 'wf.pendingTx';
+function rememberPendingTx(digest, okMsg) {
+  try { sessionStorage.setItem(PENDING_TX_KEY, JSON.stringify({ digest, okMsg, at: Date.now() })); } catch {}
+}
+function clearPendingTx() { try { sessionStorage.removeItem(PENDING_TX_KEY); } catch {} }
+
+/** Called once on app load: if a tx was in flight when the page was refreshed,
+    confirm it now and surface success/failure (no silent loss). */
+export async function recoverPendingTx() {
+  let raw = null;
+  try { raw = sessionStorage.getItem(PENDING_TX_KEY); } catch {}
+  if (!raw) return;
+  clearPendingTx();
+  let p = null;
+  try { p = JSON.parse(raw); } catch { return; }
+  if (!p?.digest) return;
+  toast('Checking a transaction from before the refresh…', { kind: 'info', tx: p.digest, timeout: 3000 });
+  try {
+    const conf = await withTimeout(sui.waitForTransaction({ digest: p.digest, options: { showEffects: true } }), 30000, 'pending transaction');
+    if (conf.effects?.status?.status === 'failure') {
+      toast('Earlier tx failed: ' + txErrorMessage(conf.effects.status.error || 'aborted on-chain'), { kind: 'error', tx: p.digest });
+    } else {
+      toast((p.okMsg || 'Earlier transaction') + ' — confirmed', { kind: 'success', tx: p.digest });
+      document.dispatchEvent(new CustomEvent('wf:tx-done'));
+    }
+  } catch {
+    toast('Could not confirm the earlier transaction — check the explorer.', { kind: 'info', tx: p.digest });
+  }
+}
+
 export async function signAndRun(tx, okMsg) {
   if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return null; }
   // zkLogin users sign with their ephemeral key (sponsor-aware) instead of a wallet.
@@ -325,10 +358,12 @@ export async function signAndRun(tx, okMsg) {
     const digest = res.digest;
     // Authoritative result from the fullnode — a Move-aborted tx still lands on-chain
     // with status "failure", so we MUST check effects, not just that it executed.
+    rememberPendingTx(digest, okMsg); // survive a refresh during confirmation
     toast('Transaction submitted. Waiting for chain confirmation...', { kind: 'info', tx: digest, timeout: 2500 });
     const conf = res.effects?.status
       ? res
       : await withTimeout(sui.waitForTransaction({ digest, options: { showEffects: true } }), 45000, 'transaction confirmation');
+    clearPendingTx(); // outcome is known now — nothing to recover
     if (conf.effects?.status?.status === 'failure') {
       throw new Error(conf.effects.status.error || 'transaction aborted on-chain');
     }

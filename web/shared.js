@@ -198,7 +198,12 @@ export function decodeSuiError(e) {
   const vm = raw.match(/VMVerificationOrDeserializationError|CommandArgumentError|ObjectNotFound|InsufficientGas|InsufficientCoinBalance/i);
   if (vm) {
     kind = vm[0].toLowerCase();
-    message = raw;
+    const VM_MSGS = {
+      insufficientgas: 'Not enough SUI to pay for gas — top up your wallet (testnet faucet) and retry.',
+      insufficientcoinbalance: 'Not enough balance for this transaction.',
+      objectnotfound: 'A required object was not found — it may have changed or been spent. Refresh and retry.',
+    };
+    message = VM_MSGS[kind] || raw;
   }
   return { kind, message, raw };
 }

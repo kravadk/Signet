@@ -21,7 +21,7 @@ import {
 import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeletonCards, skeletonRows, skeletonList } from './ui.js';
 import {
-  wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor, signAndRun, signAndRunCreated,
+  wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor, signAndRun, signAndRunCreated, recoverPendingTx,
   resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr, actClosePr,
   actVouch, actSetApprovals, actOpenDispute, actResolveDispute, actImportFromGitHub,
 } from './wallet.js';
@@ -2446,6 +2446,8 @@ renderFooter();
 renderConnect();
 // zkLogin: finish a Google redirect (if returning) or restore an active session.
 (async () => { if (!(await completeZkLoginFromRedirect())) await restoreZkLogin(); })();
+// If a transaction was in flight when the page was refreshed, confirm it now.
+recoverPendingTx();
 // re-render views when wallet connects/disconnects (My highlight, action buttons)
 document.addEventListener('wf:wallet-changed', () => { if (STATE.loaded) rerenderAll(); });
 // after a wallet tx, refresh data

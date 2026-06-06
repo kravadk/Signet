@@ -225,6 +225,26 @@ test('gRPC read mode attempts gRPC and surfaces the active source', async ({ pag
   await expect(page.locator('#netBadgeTxt')).toContainText(/gRPC|degraded|JSON-RPC/i);
 });
 
+test('a transaction in flight during a refresh is recovered, not silently lost', async ({ page }) => {
+  await installMockRpc(page);
+  await installMockWallet(page);
+  // Simulate a page that was refreshed mid-confirmation: a pending digest is left behind.
+  await page.addInitScript(() => {
+    localStorage.clear();
+    sessionStorage.setItem('wf.pendingTx', JSON.stringify({ digest: 'MOCK_DIGEST', okMsg: 'Post a bounty', at: Date.now() }));
+  });
+  await page.goto('/app');
+  await expect(page.locator('#app')).toBeVisible();
+  // recoverPendingTx() runs on load → the outcome is surfaced (never dropped).
+  await expect(page.getByText(/before the refresh|confirmed/i)).toBeVisible();
+});
+
+test('opening the app without a wallet installed prompts to connect, not crash', async ({ page }) => {
+  await boot(page, { wallet: false }); // no wallet registered
+  await page.locator('#connectBtn').click();
+  await expect(page.getByText(/No Sui wallet|install/i)).toBeVisible();
+});
+
 test('payment link create flow signs through the wallet and does not silently fail', async ({ page }) => {
   await boot(page);
   await page.locator('#connectBtn').click();
