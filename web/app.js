@@ -750,7 +750,7 @@ async function renderSponsorDashboard() {
     el.innerHTML = '<div class="empty-state">Sponsor not configured.</div>';
     return;
   }
-  el.innerHTML = '<div class="empty-state">Loading sponsor status...</div>';
+  el.innerHTML = '<div class="empty-state loading-pulse">Loading sponsor status...</div>';
   try {
     const d = await withTimeout(fetch(url).then((r) => {
       if (!r.ok) throw new Error('sponsor ' + r.status);
@@ -770,7 +770,7 @@ async function renderSponsorDashboard() {
         '</div>' +
       '</div>';
   } catch (e) {
-    el.innerHTML = '<div class="empty-state">Sponsor dashboard unavailable: ' + escapeHtml(e.message || e) + '</div>';
+    el.innerHTML = '<div class="empty-state err">Sponsor dashboard unavailable: ' + escapeHtml(e.message || e) + '</div>';
   }
 }
 
@@ -911,6 +911,11 @@ async function loadData() {
       withTimeout(listVouchEvents(), 15000, 'vouches'),
       withTimeout(listBountyLifecycleEvents(), 15000, 'bounty lifecycle'),
     ]);
+
+    // Current epoch (best-effort) — lets the agents view flag expired / soon-to-expire
+    // AgentCaps honestly instead of always showing "active".
+    try { STATE.epoch = Number((await withTimeout(sui.getLatestSuiSystemState(), 8000, 'epoch'))?.epoch ?? 0) || null; }
+    catch { STATE.epoch = STATE.epoch ?? null; }
 
     // owner from first repo (owner card may be absent — guard each element)
     const ownerAddrEl = $('ownerAddr');
@@ -1359,9 +1364,16 @@ function renderAgentsView() {
     let delegation;
     if (cap) {
       const chips = scopeChips(cap.scopes).map((s) => '<span class="scope-chip">' + s + '</span>').join('');
+      const ep = STATE.epoch;
+      const expired = !cap.revoked && cap.expires && ep != null && cap.expires <= ep;
+      const soon = !cap.revoked && !expired && cap.expires && ep != null && (cap.expires - ep) <= 5;
       const status = cap.revoked ? '<span class="cap-status revoked">revoked</span>'
+        : expired ? '<span class="cap-status revoked">expired</span>'
+        : soon ? '<span class="cap-status soon">expires soon</span>'
         : '<span class="cap-status active">active</span>';
-      const exp = cap.expires ? ' · expires epoch ' + cap.expires : ' · no expiry';
+      const exp = cap.expires
+        ? ' · expires epoch ' + cap.expires + (ep != null && !expired ? ' (~' + Math.max(0, cap.expires - ep) + ' epochs left)' : '')
+        : ' · no expiry';
       delegation =
         '<div class="delegation">' +
           '<div class="deleg-line"><span class="mono">owner</span><span class="deleg-arrow">→</span>' +
@@ -1459,7 +1471,7 @@ async function proveAgentWork(addr) {
   openModal({
     title: 'Memory vault · ' + short(addr),
     wide: true,
-    bodyHtml: '<div class="empty-state">Reconstructing memory records from Sui events and Walrus blobs...</div>',
+    bodyHtml: '<div class="empty-state loading-pulse">Reconstructing memory records from Sui events and Walrus blobs...</div>',
     onMount: async (body) => {
       const items = await memoryVaultItems(addr);
       if (!items.length) {

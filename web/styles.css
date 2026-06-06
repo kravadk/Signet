@@ -1334,6 +1334,7 @@ body:not(.reduce-motion) .feed-item:nth-child(n+7) { animation-delay: 240ms; }
 .cap-status { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; font-family: var(--mono); }
 .cap-status.active { color: var(--green); border: 1px solid rgba(70,209,138,.3); background: rgba(70,209,138,.08); }
 .cap-status.revoked { color: var(--red); border: 1px solid rgba(241,91,76,.3); background: rgba(241,91,76,.08); }
+.cap-status.soon { color: #e6a23c; border: 1px solid rgba(230,162,60,.35); background: rgba(230,162,60,.1); }
 .deleg-note { margin-top: 8px; font-size: 11.5px; color: var(--tx-4); font-style: italic; }
 
 /* ============================================================
