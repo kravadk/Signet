@@ -337,7 +337,7 @@ export function renderPlaygroundView() {
   root.dataset.built = '1';
   root.innerHTML = `
     <div class="view-head">
-      <h1>Build an app — prove it's yours <span class="wave">🔏</span></h1>
+      <h1>Build an app — prove it's yours</h1>
       <p><b>Describe an app, an AI builds it live, you publish it to Walrus + Sui.</b>
       Every published app carries <b>verifiable provenance</b> — who built it, the exact content hash,
       and unfakeable on-chain visits, stars and a remix lineage. The gallery below is read live from the chain.
@@ -372,7 +372,7 @@ export function renderPlaygroundView() {
             <option value="200">200 epochs</option>
           </select>
           ${CFG.privacyRegistry ? `<label class="pg-mini" title="encrypt the app with Seal — only you (the builder) can open it" style="display:flex;align-items:center;gap:5px;cursor:pointer">
-            <input type="checkbox" id="pgPrivate" style="margin:0"> 🔒 Private
+            <input type="checkbox" id="pgPrivate" style="margin:0"> Private
           </label>` : ''}
           <button class="btn-primary pg-mini" id="pgPublish" disabled>Publish</button>
         </div>
@@ -670,7 +670,7 @@ async function publishPrivate(spec, archive, manifest, treeHash, mode) {
   pgCall(tx2, 'playground::set_private', [tx2.object(CFG.privacyRegistry), tx2.object(appId), tx2.pure.bool(true)]);
   const r2 = await signAndRun(tx2, 'App encrypted + marked private');
   if (r2) {
-    toast('🔒 Private app published — only you can open it', { kind: 'success', tx: r2.digest });
+    toast('Private app published — only you can open it', { kind: 'success', tx: r2.digest });
     pg.basePrompt = null;
     await loadGallery();
   } else {
@@ -829,7 +829,7 @@ export function renderGallery() {
         <span class="pg-by">by <button class="pg-builder" data-act="profile" data-builder="${a.builder}">${escapeHtml(displayName(a.builder))}</button></span>
         ${a.parent ? '<span class="pg-lineage" title="remixed from another app">⑂ remix</span>' : ''}
         ${a.forkPrice ? `<span class="pg-lineage" title="forking this app costs ${suiAmount(a.forkPrice)} SUI, paid to the builder">⑂ ${suiAmount(a.forkPrice)} SUI to fork</span>` : ''}
-        ${a.private ? '<span class="pg-lineage" title="Seal-encrypted — only the builder can open it">🔒 private</span>' : ''}
+        ${a.private ? '<span class="pg-lineage" title="Seal-encrypted — only the builder can open it">private</span>' : ''}
       </div>
       <div class="pg-stats">
         <span class="pg-stat" title="on-chain visits">▶ ${a.visits}</span>
@@ -842,18 +842,18 @@ export function renderGallery() {
       </div>
       <div class="pg-card-actions">
         <button class="btn-primary pg-mini" data-act="open" data-app="${a.id}">Open ↗</button>
-        <button class="btn-ghost pg-mini" data-act="share" data-app="${a.id}" title="copy a shareable, verifiable link to this app">🔗 Share</button>
-        <button class="btn-ghost pg-mini" data-act="history" data-app="${a.id}" title="version history (on-chain AppUpdated events)">🕘 History</button>
+        <button class="btn-ghost pg-mini" data-act="share" data-app="${a.id}" title="copy a shareable, verifiable link to this app">Share</button>
+        <button class="btn-ghost pg-mini" data-act="history" data-app="${a.id}" title="version history (on-chain AppUpdated events)">History</button>
         <button class="btn-ghost pg-mini" data-act="remix" data-app="${a.id}" title="${a.forkPrice ? `fork costs ${suiAmount(a.forkPrice)} SUI (paid to the builder)` : 'remix this app'}">${a.forkPrice ? `Fork ◈ ${suiAmount(a.forkPrice)}` : 'Remix'}</button>
         <button class="btn-ghost pg-mini" data-act="star" data-app="${a.id}">★</button>
         <button class="btn-ghost pg-mini" data-act="tip" data-app="${a.id}">◈ Tip</button>
-        <button class="btn-ghost pg-mini" data-act="site" data-app="${a.id}" title="mint a real on-chain Walrus Site for this app">🌐 Site</button>
+        <button class="btn-ghost pg-mini" data-act="site" data-app="${a.id}" title="mint a real on-chain Walrus Site for this app">Site</button>
         ${STATE.wallet && STATE.wallet.address === a.builder
-          ? `${CFG.nameRegistry ? `<button class="btn-ghost pg-mini" data-act="edit" data-app="${a.id}" title="publish a new version of your app">✏️ Update</button>` : ''}
-             ${CFG.forkRegistry ? `<button class="btn-ghost pg-mini" data-act="price" data-app="${a.id}" title="charge a fee to fork your app (paid to you, minus a small protocol fee)">💲 ${a.forkPrice ? 'Price ◈ ' + suiAmount(a.forkPrice) : 'Fork price'}</button>` : ''}
-             <button class="btn-ghost pg-mini" data-act="renew" data-app="${a.id}" title="re-pin this app's bytes so they don't expire (you pay WAL)">⏳ Renew</button>
-             <button class="btn-ghost pg-mini" data-act="hide" data-app="${a.id}" title="hide your app from the gallery">🙈 Hide</button>`
-          : `<button class="btn-ghost pg-mini" data-act="flag" data-app="${a.id}" title="report this app">⚐ Flag${a.flags ? ' ' + a.flags : ''}</button>`}
+          ? `${CFG.nameRegistry ? `<button class="btn-ghost pg-mini" data-act="edit" data-app="${a.id}" title="publish a new version of your app">Update</button>` : ''}
+             ${CFG.forkRegistry ? `<button class="btn-ghost pg-mini" data-act="price" data-app="${a.id}" title="charge a fee to fork your app (paid to you, minus a small protocol fee)">${a.forkPrice ? 'Price ◈ ' + suiAmount(a.forkPrice) : 'Fork price'}</button>` : ''}
+             <button class="btn-ghost pg-mini" data-act="renew" data-app="${a.id}" title="re-pin this app's bytes so they don't expire (you pay WAL)">Renew</button>
+             <button class="btn-ghost pg-mini" data-act="hide" data-app="${a.id}" title="hide your app from the gallery">Hide</button>`
+          : `<button class="btn-ghost pg-mini" data-act="flag" data-app="${a.id}" title="report this app">Flag${a.flags ? ' ' + a.flags : ''}</button>`}
         <a class="pg-verify" href="${explorerObject(a.id)}" target="_blank" rel="noreferrer" title="verifiable on-chain record">✓ on-chain</a>
       </div>
     </div>`).join('');
@@ -1095,7 +1095,7 @@ async function openPrivateApp(app) {
     openModal({
       title: `${app.name} - private`,
       wide: true,
-      bodyHtml: `<iframe id="pgPrivFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" style="width:100%;height:68vh;border:0;background:#fff;border-radius:8px"></iframe>`,
+      bodyHtml: `<iframe id="pgPrivFrame" sandbox="allow-scripts" referrerpolicy="no-referrer" style="width:100%;height:68vh;border:0;background:var(--bg-app);border-radius:4px"></iframe>`,
       onMount(m) { m.querySelector('#pgPrivFrame').srcdoc = html; },
     });
   } catch (e) {
@@ -1110,7 +1110,7 @@ async function shareApp(id) {
   const url = appViewerUrl(app);
   try {
     await navigator.clipboard.writeText(url);
-    toast('Share link copied 🔗 — verifiable provenance baked in');
+    toast('Share link copied — verifiable provenance baked in');
   } catch {
     // Clipboard blocked (insecure context / permissions) — fall back to opening it.
     window.prompt('Copy this shareable link:', url);
@@ -1145,7 +1145,7 @@ async function flagApp(id) {
   if (!CFG.flagRegistry) { toast('Moderation not deployed on this network', { kind: 'error' }); return; }
   const tx = new Transaction();
   pgCall(tx, 'playground::flag_app', [tx.object(id), tx.object(CFG.flagRegistry)]);
-  await runSocial(tx, 'Reported ⚐', loadGallery);
+  await runSocial(tx, 'Reported', loadGallery);
 }
 
 async function setHidden(id, hidden) {
@@ -1734,7 +1734,7 @@ function openSettings() {
       <p class="pg-dim" style="font-size:12px;margin-top:4px">When set, value-free actions are gas-sponsored — you don't need SUI. Falls back to your wallet if unset/unavailable. See server/sponsor.</p>
       <label style="margin-top:8px">Portal URL (optional — share links with previews)</label>
       <input type="text" id="pgPortalUrl" placeholder="https://your-portal.example.com" value="${escapeHtml(SETTINGS.portalUrl || '')}">
-      <p class="pg-dim" style="font-size:12px;margin-top:4px">When set, 🔗 Share uses <code>&lt;portal&gt;/app/&lt;id&gt;</code> — clean URLs with Open Graph link previews. See server/portal.</p>
+      <p class="pg-dim" style="font-size:12px;margin-top:4px">When set, Share uses <code>&lt;portal&gt;/app/&lt;id&gt;</code> — clean URLs with Open Graph link previews. See server/portal.</p>
       <details style="margin-top:10px">
         <summary class="pg-dim" style="cursor:pointer">Sign in with Google (zkLogin) — no wallet</summary>
         <label style="margin-top:6px">Google OAuth client id</label>

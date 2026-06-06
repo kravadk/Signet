@@ -1446,7 +1446,10 @@ body:not(.reduce-motion) .onboard { animation: cardIn .4s var(--ease) both; }
 .pg-frame-bar { display: flex; align-items: center; gap: 6px; padding: 9px 12px; background: var(--bg-elev); border-bottom: 1px solid var(--bd); }
 .pg-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bd-strong); }
 .pg-frame-title { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--tx-3); flex: 1; }
-.pg-preview-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.pg-preview-frame { flex: 1; width: 100%; border: 0; background: var(--bg-app); }
+/* dark, mono publish-bar selects (native white default clashes with the terminal UI) */
+.pg-frame-bar select.pg-mini { background: var(--bg-input); color: var(--tx); border: 1px solid var(--bd-strong); border-radius: var(--r-sm); font-family: var(--mono); cursor: pointer; }
+.pg-frame-bar select.pg-mini option { background: var(--bg-elev); color: var(--tx); }
 
 .pg-gallery-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 8px 0 16px; }
 .pg-gallery-head h2 { font-size: 21px; font-weight: 800; }

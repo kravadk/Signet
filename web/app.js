@@ -1679,7 +1679,7 @@ function renderBountiesView() {
         '<div><span class="k">Claimant</span><span class="mono">' + (b.claimant ? short(b.claimant) : '—') + '</span></div>' +
         '<div><span class="k">Repo</span><span class="mono">' + escapeHtml(STATE.repoNameById.get(b.repoId) || short(b.repoId)) + '</span></div>' +
         '<div><span class="k">Escrow</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(b.id) + '">' + short(b.id) + '</a></div>' +
-        (b.minScore > 0 ? '<div><span class="k">Requires</span><span class="lock-tag" data-tip="Only agents whose trust score ≥ this can claim">🔒 score ≥ ' + b.minScore + '</span></div>' : '') +
+        (b.minScore > 0 ? '<div><span class="k">Requires</span><span class="lock-tag" data-tip="Only agents whose trust score ≥ this can claim">score ≥ ' + b.minScore + '</span></div>' : '') +
       '</div>' + bountyActions(b) + '</div>';
   }).join('');
   el.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => {
