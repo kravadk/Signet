@@ -3,6 +3,8 @@
 [![CI](https://github.com/kravadk/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/kravadk/signet/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Sui](https://img.shields.io/badge/Sui-testnet%20%2B%20mainnet-4da2ff.svg)](#live-deployments)
+[![API reference](https://img.shields.io/badge/API-FUNCTIONS.md-46d18a.svg)](FUNCTIONS.md)
+[![Security](https://img.shields.io/badge/security-SECURITY.md-c0e6ff.svg)](SECURITY.md)
 
 **Describe an app → an AI builds it live → publish it to Walrus + Sui with verifiable provenance.**
 
@@ -352,20 +354,17 @@ npm i -g @signet/cli && forge <command>   # or global `forge` / `signet`
 | `forge doctor` | environment / config health check |
 | `forge status` | repos / PRs / releases overview |
 
+Full command index (24) and the Move/MCP/SDK/web/service surfaces → [FUNCTIONS.md](FUNCTIONS.md).
+
 ---
 
 ## MCP server (agent-native)
 
 Agents drive Signet through an MCP server that signs with the **agent's own key**, bounded
-by the agent's on-chain `AgentCap`. The current server exposes 22 tools:
-
-- **Signet read (no key):** `repo_list`, `repo_read_manifest`, `release_read`, `release_verify`,
-  `issue_list`, `bounty_list`, `agent_reputation`.
-- **Sui primitives (read-only):** `sui_balance`, `sui_object`, `sui_tx`, `sui_events`.
-- **Testnet utility:** `sui_faucet_testnet` (disabled on mainnet).
-- **Manifest:** `signet_tool_manifest`.
-- **Write-like Signet tools:** `pr_create`, `review_submit`, `artifact_upload`, `issue_create`,
-  `issue_comment`, `bounty_claim`, `bounty_submit`, `agent_vouch`, `app_publish`.
+by the agent's on-chain `AgentCap`. The server exposes **22 tools** — Signet reads (`repo_*`,
+`release_*`, `issue_list`, `bounty_list`, `agent_reputation`), write-like Signet tools
+(`pr_create`, `review_submit`, `bounty_claim`, `app_publish`, …) and Sui primitives
+(`sui_balance`/`object`/`tx`/`events`, `sui_faucet_testnet`). Full list → [FUNCTIONS.md](FUNCTIONS.md).
 
 Write-like tools support `dryRun: true`, returning a structured plan without a key, upload or
 signature. Normal writes still require `FORGE_AGENT_KEY` and the matching on-chain cap/scope.
@@ -404,6 +403,7 @@ const payment = await signet.payment.create({
 ```
 
 (The package ships TypeScript and runs via `tsx`; import it from a `tsx`/bundler context.)
+Full export list (builders, reads, Merkle, Walrus, typed clients, types) → [FUNCTIONS.md](FUNCTIONS.md).
 
 ---
 
@@ -623,20 +623,15 @@ and [`.github/SELF-AUDIT.md`](.github/SELF-AUDIT.md) are checked by `scripts/mai
 
 ## Operations & hardening
 
-Production concerns are built in and **degrade-safe** — every integration no-ops when unconfigured,
-so nothing is required to run locally:
+Production concerns are built in and **degrade-safe** — every integration no-ops when
+unconfigured, so nothing is required to run locally: per-IP **rate limiting**, Prometheus
+**`/metrics`**, **`/health` + public `/status`**, **env-gated error tracking**, and strict
+**security headers** (CSP report-only first, HSTS, `frame-ancestors`). Mainnet is a manual,
+approved step — see `.github/MAINNET-RUNBOOK.md` (preflight, key rotation → multisig, rollback)
+and the threat→mitigation→test map in [SECURITY.md](SECURITY.md).
 
-- **Rate limiting** — per-IP on all HTTP services, env-tunable via `RATE_LIMIT_PER_MIN` (disabled at
-  `<=0`; only rejects over the limit, returns `429 Retry-After`).
-- **Metrics** — Prometheus `/metrics` (`signet_*` counters) on the gateway, salt, portal, importer.
-- **Health/status** — `/health` on every service; public `/status` on the gateway and portal.
-- **Error tracking** — env-gated: always logs structured errors, additionally POSTs to
-  `ERROR_TRACKING_DSN` (alias `ERROR_DSN`/`SENTRY_DSN`) when set, else a pure no-op.
-- **Security headers** (`web/vercel.json`) — CSP (report-only first), HSTS, `X-Frame-Options`,
-  `frame-ancestors 'self'`, `nosniff`, Referrer/Permissions-Policy.
-- **Mainnet/audit-readiness** — `.github/MAINNET-RUNBOOK.md` (preflight, key rotation → multisig,
-  rollback/communication), `scripts/mainnet-readiness-check.mjs`, and the threat→mitigation→test map
-  in [SECURITY.md](SECURITY.md). No deploy is automated; mainnet is a manual, approved step.
+Exact tunables (`RATE_LIMIT_PER_MIN`, `ERROR_TRACKING_DSN`, …) and per-service endpoints →
+[FUNCTIONS.md](FUNCTIONS.md).
 
 ---
 
