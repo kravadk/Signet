@@ -1,0 +1,11 @@
+# Code ownership — every PR requests a review from the listed owner(s).
+# Last match wins, so more specific paths override the default.
+
+# Default owner for the whole repository.
+*                       @kravadk
+
+# Security-sensitive surfaces — explicit ownership.
+/move/                  @kravadk
+/app/src/lib/sui.ts     @kravadk
+/SECURITY.md            @kravadk
+/.github/               @kravadk
