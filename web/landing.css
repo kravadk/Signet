@@ -238,7 +238,11 @@ section { padding: 72px 0; position: relative; }
 .app-frame { position: relative; aspect-ratio: 16 / 11; background: var(--s1); overflow: hidden; border: 1px solid var(--bd); border-radius: var(--r); }
 .app-frame iframe { position: absolute; top: 0; left: 0; width: 200%; height: 200%; transform: scale(.5); transform-origin: top left; border: 0; background: var(--s1); pointer-events: none; }
 .app-frame .app-open { position: absolute; inset: 0; display: block; z-index: 3; }
-.app-frame .app-load { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; font-size: 12px; color: var(--tx-3); }
+.app-frame .app-load { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; text-align: center; line-height: 1.6; padding: 0 14px; font-size: 12.5px; color: var(--tx-2); }
+.app-frame.expired { background: var(--bg); }
+.app-frame.expired .app-load { color: var(--tx-2); }
+.app-frame.expired .exp-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); margin-right: 6px; vertical-align: middle; }
+.app-frame .exp-sub { color: var(--tx-3); font-size: 11px; }
 .app-frame::after { content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .03); }
 .app-frame.skel { animation: shimmer 1.4s infinite linear; background: linear-gradient(90deg, var(--s1) 25%, var(--s3) 37%, var(--s1) 63%); background-size: 400% 100%; }
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }

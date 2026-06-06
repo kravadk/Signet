@@ -224,9 +224,15 @@ async function loadApps() {
         if (!en.isIntersecting) continue;
         const f = en.target; io.unobserve(f);
         const load = f.previousElementSibling;
+        // Walrus blobs are ephemeral on testnet; if the archive lapsed we still have the
+        // on-chain record — so degrade to a proof state, not a broken "n/a".
+        const expired = () => {
+          const fr = f.closest('.app-frame'); if (fr) fr.classList.add('expired');
+          if (load) load.innerHTML = '<span class="exp-dot"></span> on-chain record ✓<br><span class="exp-sub">archive expired · open the record ↗</span>';
+        };
         inflateIndexHtml(f.dataset.archive)
-          .then((html) => { if (html) { f.srcdoc = html; load?.remove(); } else if (load) load.textContent = 'preview n/a · open ↗'; })
-          .catch(() => { if (load) load.textContent = 'preview n/a · open ↗'; });
+          .then((html) => { if (html) { f.srcdoc = html; load?.remove(); } else expired(); })
+          .catch(expired);
       }
     }, { rootMargin: '250px' });
     grid.querySelectorAll('iframe[data-archive]').forEach((f) => io.observe(f));
