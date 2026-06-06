@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { installShutdown, log, strictCors } from './lib.mjs';
+import { installShutdown, log, strictCors, makeRateLimiter, clientIp, makeMetrics, captureError } from './lib.mjs';
 import { buildSnapshot } from '../../app/src/lib/snapshot.ts';
 import { storeBlobAuto } from '../../app/src/lib/walrus.ts';
 
@@ -83,12 +83,21 @@ function readBody(req) {
   });
 }
 
+// Cloning is expensive, so default to a tighter limit than other services.
+const limited = makeRateLimiter({ perMin: Number(process.env.RATE_LIMIT_PER_MIN || 10) });
+const metrics = makeMetrics('importer');
+
 const server = createServer(async (req, res) => {
   strictCors(res, req.headers.origin, ALLOWED_ORIGIN);
+  if (req.method === 'GET' && req.url === '/metrics') {
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); return res.end(metrics.text());
+  }
   res.setHeader('content-type', 'application/json');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') { res.writeHead(200); return res.end(JSON.stringify({ ok: true })); }
   if (req.method === 'POST' && (req.url === '/import' || req.url === '/')) {
+    metrics.inc('requests_total');
+    if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — clones are expensive, slow down' })); }
     try {
       const { url, branch } = JSON.parse((await readBody(req)) || '{}');
       if (!url) { res.writeHead(400); return res.end(JSON.stringify({ error: 'url required' })); }
@@ -96,7 +105,8 @@ const server = createServer(async (req, res) => {
       log('info', 'imported', { name: out.name, files: out.files });
       res.writeHead(200); return res.end(JSON.stringify(out));
     } catch (e) {
-      log('warn', 'import failed', { err: String(e.message || e) });
+      metrics.inc('request_errors_total');
+      captureError(e, { at: 'import' });
       res.writeHead(400); return res.end(JSON.stringify({ error: String(e.message || e) }));
     }
   }

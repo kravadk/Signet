@@ -18,7 +18,7 @@
  */
 import { createServer } from 'node:http';
 import { createPublicKey, createVerify, createHmac } from 'node:crypto';
-import { installShutdown, log, fetchT } from './lib.mjs';
+import { installShutdown, log, fetchT, makeRateLimiter, clientIp, makeMetrics, captureError } from './lib.mjs';
 
 const PORT = Number(process.env.PORT || 8789);
 const SALT_SECRET = process.env.SALT_SECRET || '';
@@ -84,15 +84,23 @@ function readBody(req) {
   });
 }
 
+const limited = makeRateLimiter();
+const metrics = makeMetrics('salt');
+
 const server = createServer(async (req, res) => {
   cors(res, req.headers.origin);
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.method === 'GET' && req.url === '/metrics') {
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); return res.end(metrics.text());
+  }
   if (req.method === 'GET' && req.url === '/health') {
     // Real readiness: the JWKS must be fetchable, else we can't verify any JWT.
     try { const keys = await getKeys(); return json(res, keys.length ? 200 : 503, { ok: keys.length > 0, jwks: JWKS_URL, keys: keys.length }); }
-    catch (e) { return json(res, 503, { ok: false, jwks: JWKS_URL, error: String(e.message || e) }); }
+    catch (e) { captureError(e, { at: 'health/jwks' }); return json(res, 503, { ok: false, jwks: JWKS_URL, error: String(e.message || e) }); }
   }
   if (req.method !== 'POST' || req.url !== '/salt') return json(res, 404, { error: 'not found' });
+  metrics.inc('requests_total');
+  if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.setHeader('Retry-After', '60'); return json(res, 429, { error: 'rate limit — slow down a moment' }); }
   let body;
   try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'invalid JSON' }); }
   if (!body || typeof body.jwt !== 'string') return json(res, 400, { error: 'jwt required' });
@@ -100,6 +108,7 @@ const server = createServer(async (req, res) => {
     const payload = await verifyJwt(body.jwt);
     return json(res, 200, { salt: deriveSalt(payload) });
   } catch (e) {
+    metrics.inc('request_errors_total'); // verification failures are client errors — count, don't page
     return json(res, 401, { error: 'jwt verification failed: ' + (e.message || e) });
   }
 });

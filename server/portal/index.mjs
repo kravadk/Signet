@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { installShutdown, log, fetchT, ttlCache } from './lib.mjs';
+import { installShutdown, log, fetchT, ttlCache, makeRateLimiter, clientIp, makeMetrics, captureError } from './lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8790);
@@ -258,10 +258,21 @@ async function aggregateStatus() {
   return [self, ...others];
 }
 
+const limited = makeRateLimiter();
+const metrics = makeMetrics('portal');
+
 const server = createServer(async (req, res) => {
   try {
     const u = new URL(req.url, ORIGIN);
     const net = pickNet(u.searchParams.get('net'));
+    if (u.pathname === '/metrics') {
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); return res.end(metrics.text());
+    }
+    // Rate-limit everything except liveness/metrics probes (degrade-safe).
+    if (u.pathname !== '/health' && u.pathname !== '/status') {
+      metrics.inc('requests_total');
+      if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'content-type': 'application/json', 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — slow down a moment' })); }
+    }
     if (u.pathname === '/health') {
       const rpc = await rpcStatus().catch(() => ({}));
       const ok = Object.keys(NETS).length > 0 && Object.values(rpc).some(Boolean);
@@ -296,6 +307,8 @@ const server = createServer(async (req, res) => {
     if (u.pathname === '/') { res.writeHead(302, { location: '/api/apps' }); return res.end(); }
     res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }); res.end(notFound('Not found. Try /app/<id> or /@<handle>.'));
   } catch (e) {
+    metrics.inc('request_errors_total');
+    captureError(e, { at: 'portal', url: req.url });
     res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' }); res.end(notFound('Error: ' + (e?.message || e)));
   }
 });
