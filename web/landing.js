@@ -233,52 +233,6 @@ async function loadApps() {
   } catch { grid.innerHTML = '<p class="muted">Live apps unavailable right now.</p>'; }
 }
 
-/* ---------- hero constellation (mouse-reactive) ---------- */
-function initCanvas() {
-  const cv = $('heroCanvas'); if (!cv || reduceMotion) return;
-  const ctx = cv.getContext('2d'); let w, h, dpr, nodes, raf;
-  const mouse = { x: -999, y: -999 };
-  function resize() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    const r = cv.parentElement.getBoundingClientRect();
-    w = r.width; h = r.height; cv.width = w * dpr; cv.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const count = Math.max(28, Math.min(72, Math.floor(w * h / 16000)));
-    nodes = Array.from({ length: count }, () => ({
-      x: Math.random() * w, y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.25, vy: (Math.random() - 0.5) * 0.25,
-    }));
-  }
-  function frame() {
-    ctx.clearRect(0, 0, w, h);
-    for (const n of nodes) {
-      n.x += n.vx; n.y += n.vy;
-      if (n.x < 0 || n.x > w) n.vx *= -1; if (n.y < 0 || n.y > h) n.vy *= -1;
-      const dx = mouse.x - n.x, dy = mouse.y - n.y, d = Math.hypot(dx, dy);
-      if (d < 140 && d > 0.1) { n.x += (dx / d) * 0.5; n.y += (dy / d) * 0.5; }
-    }
-    for (let i = 0; i < nodes.length; i++) {
-      for (let k = i + 1; k < nodes.length; k++) {
-        const a = nodes[i], b = nodes[k], dist = Math.hypot(a.x - b.x, a.y - b.y);
-        if (dist < 120) {
-          ctx.strokeStyle = `rgba(77,162,255,${(1 - dist / 120) * 0.32})`;
-          ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        }
-      }
-    }
-    for (const n of nodes) {
-      const near = Math.hypot(mouse.x - n.x, mouse.y - n.y) < 140;
-      ctx.fillStyle = near ? 'rgba(192,230,255,.9)' : 'rgba(77,162,255,.55)';
-      ctx.beginPath(); ctx.arc(n.x, n.y, near ? 2.6 : 1.6, 0, 6.283); ctx.fill();
-    }
-    raf = requestAnimationFrame(frame);
-  }
-  const hero = cv.parentElement;
-  hero.addEventListener('pointermove', (e) => { const r = hero.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
-  hero.addEventListener('pointerleave', () => { mouse.x = -999; mouse.y = -999; });
-  window.addEventListener('resize', resize, { passive: true });
-  resize(); frame();
-}
-
 /* ---------- scroll reveal ---------- */
 function initReveal() {
   const els = document.querySelectorAll('.reveal');
@@ -325,7 +279,7 @@ function initTilt() {
 }
 
 /* ---------- boot ---------- */
-initNav(); initReveal(); initChain(); initTilt(); initCanvas();
+initNav(); initReveal(); initChain(); initTilt();
 loadStats(); loadTicker(); loadReleases(); loadApps();
 const vfBtn = $('vfRun');
 if (vfBtn) vfBtn.addEventListener('click', () => { const id = $('vfSelect')?.value; if (id && releaseMap.has(id)) verifyRelease(id); });
