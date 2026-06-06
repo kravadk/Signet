@@ -218,6 +218,63 @@ async function getBalanceGraphql(args) {
   };
 }
 
+/* ---------- gRPC transport (real attempt; honest fallback) ----------
+   Uses @mysten/sui/grpc SuiGrpcClient's Core API. Browser gRPC needs a
+   Connect/gRPC-web endpoint + CORS, so if the testnet gRPC endpoint isn't
+   browser-reachable this degrades to JSON-RPC — but via a REAL call, reporting
+   the actual error (never a hardcoded stub). The gRPC Core API has no event
+   query, so events always use JSON-RPC even in gRPC mode (stated honestly). */
+const GRPC_ENDPOINTS = {
+  testnet: 'https://fullnode.testnet.sui.io:443',
+  mainnet: 'https://fullnode.mainnet.sui.io:443',
+};
+let _grpc = null, _grpcLoad = null;
+async function grpcClient() {
+  if (_grpc) return _grpc;
+  if (!_grpcLoad) {
+    _grpcLoad = (async () => {
+      const { SuiGrpcClient } = await import('https://esm.sh/@mysten/sui@1.30.0/grpc');
+      _grpc = new SuiGrpcClient({ network: CFG.network, url: CFG.grpcUrl || GRPC_ENDPOINTS[CFG.network] || GRPC_ENDPOINTS.testnet });
+      return _grpc;
+    })();
+  }
+  return _grpcLoad;
+}
+async function getBalanceGrpc(args) {
+  const g = await grpcClient();
+  const r = await withTimeout(g.core.getBalance({ owner: args.owner, coinType: args.coinType || '0x2::sui::SUI' }), 12000, 'grpc');
+  const bal = r?.balance ?? r;
+  if (bal?.balance == null && bal?.totalBalance == null) throw new Error('gRPC balance: unexpected shape');
+  markOk('gRPC');
+  return {
+    coinType: bal.coinType || args.coinType || '0x2::sui::SUI',
+    coinObjectCount: Number(bal.coinObjectCount ?? bal.coinCount ?? 0),
+    totalBalance: String(bal.balance ?? bal.totalBalance ?? '0'),
+  };
+}
+function grpcObjectToRpc(o) {
+  if (!o) return { error: { code: 'notFound', object_id: '' } };
+  const id = o.objectId || o.id;
+  if (!id) throw new Error('gRPC object: unexpected shape');
+  const mv = o.contents || o.asMoveObject?.contents || {};
+  return {
+    data: {
+      objectId: id,
+      version: String(o.version ?? ''),
+      digest: o.digest || '',
+      content: { dataType: 'moveObject', type: mv.type?.repr || mv.type || '', fields: mv.json || mv.fields || {} },
+    },
+  };
+}
+async function multiGetObjectsGrpc(args) {
+  const g = await grpcClient();
+  const r = await withTimeout(g.core.getObjects({ objectIds: args.ids || [] }), 12000, 'grpc');
+  const objs = r?.objects || r || [];
+  const out = (args.ids || []).map((_, i) => grpcObjectToRpc(objs[i]));
+  markOk('gRPC');
+  return out;
+}
+
 export async function readQueryEvents(args) {
   if (READ_SOURCE.requested === 'graphql') {
     try {
@@ -226,7 +283,13 @@ export async function readQueryEvents(args) {
       markFallback(e);
     }
   } else if (READ_SOURCE.requested === 'grpc') {
-    markFallback('Browser gRPC transport is not configured; using JSON-RPC fallback.');
+    // gRPC Core API exposes no event query — confirm transport with a real call,
+    // then serve events over JSON-RPC (honest, not a hardcoded stub).
+    try {
+      const g = await grpcClient();
+      await withTimeout(g.core.getReferenceGasPrice({}), 8000, 'grpc');
+      markFallback('gRPC reachable; events use JSON-RPC (no gRPC Core event query)');
+    } catch (e) { markFallback(e); }
   }
   const page = await sui.queryEvents(args);
   READ_SOURCE.active = READ_SOURCE.degraded ? 'json-rpc' : READ_SOURCE.requested;
@@ -236,6 +299,8 @@ export async function readQueryEvents(args) {
 export async function readGetObject(args) {
   if (READ_SOURCE.requested === 'graphql') {
     try { return (await multiGetObjectsGraphql({ ids: [args.id], options: args.options }))[0]; } catch (e) { markFallback(e); }
+  } else if (READ_SOURCE.requested === 'grpc') {
+    try { return (await multiGetObjectsGrpc({ ids: [args.id] }))[0]; } catch (e) { markFallback(e); }
   }
   return sui.getObject(args);
 }
@@ -243,6 +308,8 @@ export async function readGetObject(args) {
 export async function readMultiGetObjects(args) {
   if (READ_SOURCE.requested === 'graphql') {
     try { return await multiGetObjectsGraphql(args); } catch (e) { markFallback(e); }
+  } else if (READ_SOURCE.requested === 'grpc') {
+    try { return await multiGetObjectsGrpc(args); } catch (e) { markFallback(e); }
   }
   return sui.multiGetObjects(args);
 }
@@ -250,6 +317,8 @@ export async function readMultiGetObjects(args) {
 export async function readGetBalance(args) {
   if (READ_SOURCE.requested === 'graphql') {
     try { return await getBalanceGraphql(args); } catch (e) { markFallback(e); }
+  } else if (READ_SOURCE.requested === 'grpc') {
+    try { return await getBalanceGrpc(args); } catch (e) { markFallback(e); }
   }
   return sui.getBalance(args);
 }

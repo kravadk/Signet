@@ -22,7 +22,7 @@ import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeletonCards, skeletonRows, skeletonList } from './ui.js';
 import {
   wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor, signAndRun, signAndRunCreated,
-  resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr,
+  resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr, actClosePr,
   actVouch, actSetApprovals, actOpenDispute, actResolveDispute, actImportFromGitHub,
 } from './wallet.js';
 import { wirePlayground, renderPlaygroundView, loadGallery } from './playground.js';
@@ -853,8 +853,10 @@ async function loadData() {
   if (pubEl) pubEl.textContent = pubHost;
 
   // Network labels (badge + owner card) follow the active network, not a literal.
+  // Use the active read source (Live RPC / GraphQL / gRPC / degraded) — do NOT
+  // hard-code "live", which would hide the real transport selected via ?graphql/?grpc.
   const badgeTxt = $('netBadgeTxt');
-  if (badgeTxt) badgeTxt.textContent = CFG.network + ' · live';
+  if (badgeTxt) badgeTxt.textContent = `${CFG.network} · ${readSourceLabel()}`;
   const badge = $('netBadge');
   if (badge) {
     const other = CFG.network === 'mainnet' ? 'testnet' : 'mainnet';
@@ -2040,6 +2042,12 @@ async function doMerge(p) {
   await actMergePr(p.repoId, p.id, ownerCapId, reputationId);
 }
 
+async function doClosePr(p) {
+  const ownerCapId = ownerCapFor(p.repoId);
+  if (!ownerCapId) { toast('You do not own this repo', { kind: 'error' }); return; }
+  await actClosePr(p.repoId, p.id, ownerCapId);
+}
+
 async function showPrDetail(prId) {
   backTo = 'prs';
   const p = STATE.prs.find((x) => x.id === prId);
@@ -2069,6 +2077,10 @@ async function showPrDetail(prId) {
       'npm run forge -- merge --pr ' + p.id,
       'Merge is owner-only and advances the repo ref. Agents can never merge.',
       ownerCapFor(p.repoId) ? { label: '✓ Merge PR', fn: () => doMerge(p) } : null) : '') +
+    (p.status === 0 && ownerCapFor(p.repoId) ? cmdPanel('Close this PR without merging (owner)',
+      'npm run forge -- close-pr --pr ' + p.id,
+      'Closes an open PR that will not be merged — does not advance the repo ref.',
+      { label: '✕ Close PR', fn: () => doClosePr(p) }) : '') +
     '<h3 class="detail-h3">Changed files</h3><div class="diff" id="prDiff"><div class="empty-state">Computing diff…</div></div>' +
     '<h3 class="detail-h3">Reviews <span class="mono">(' + (p.reviewRefs?.length || 0) + ')</span></h3><div id="prReviews"><div class="empty-state">Loading reviews…</div></div>';
 

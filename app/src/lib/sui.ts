@@ -272,6 +272,23 @@ export async function mergePr(
   return sign(ctx, tx);
 }
 
+/** Close an OPEN pull request without merging (owner only). */
+export async function closePr(
+  ctx: ForgeContext,
+  args: { repoId: string; prId: string; ownerCapId: string },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::pull_request::close_pr`,
+    arguments: [
+      tx.object(args.repoId),
+      tx.object(args.prId),
+      tx.object(args.ownerCapId),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
 export async function revokeAgentCap(
   ctx: ForgeContext,
   args: { repoId: string; ownerCapId: string; agentCapId: string },

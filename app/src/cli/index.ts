@@ -30,6 +30,7 @@ import {
   openPrAsAgent,
   submitReviewAsAgent,
   mergePr,
+  closePr,
   publishRelease,
   vouch,
   setMinApprovals,
@@ -353,6 +354,18 @@ program
     console.log(`✓ PR merged`);
     console.log(`  ref now: ${snap}`);
     console.log(`  tx:      ${res.digest}`);
+  });
+
+program
+  .command("close-pr")
+  .description("Close an OPEN PR without merging (owner only)")
+  .requiredOption("--pr <prId>", "PullRequest object id")
+  .option("-d, --dir <dir>", "repo dir", ".")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const s = loadState(opts.dir);
+    const res = await closePr(ctx, { repoId: s.repoId, prId: opts.pr, ownerCapId: s.ownerCapId });
+    console.log(`✓ PR closed\n  tx: ${res.digest}`);
   });
 
 program

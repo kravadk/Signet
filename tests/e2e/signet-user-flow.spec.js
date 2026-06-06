@@ -166,7 +166,10 @@ async function boot(page, opts = {}) {
   });
   await installMockRpc(page, opts);
   if (opts.wallet !== false) await installMockWallet(page, opts);
-  await page.goto(opts.path || '/');
+  // App shell lives at /app ( / is the marketing landing after the reorg ).
+  // Use the clean URL — `serve`'s cleanUrls 301-redirects /app.html to /app and
+  // drops the query string, which would hide ?graphql=1 / ?grpc=1.
+  await page.goto(opts.path || '/app');
   await expect(page.locator('#app')).toBeVisible();
 }
 
@@ -213,8 +216,13 @@ test('RPC outage shows explicit sync error with retry', async ({ page }) => {
 });
 
 test('GraphQL read mode attempts GraphQL and surfaces the active source', async ({ page }) => {
-  await boot(page, { wallet: false, path: '/?graphql=1' });
+  await boot(page, { wallet: false, path: '/app?graphql=1' });
   await expect(page.locator('#netBadgeTxt')).toContainText(/GraphQL|degraded/i);
+});
+
+test('gRPC read mode attempts gRPC and surfaces the active source', async ({ page }) => {
+  await boot(page, { wallet: false, path: '/app?grpc=1' });
+  await expect(page.locator('#netBadgeTxt')).toContainText(/gRPC|degraded|JSON-RPC/i);
 });
 
 test('payment link create flow signs through the wallet and does not silently fail', async ({ page }) => {

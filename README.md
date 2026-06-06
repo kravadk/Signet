@@ -161,10 +161,11 @@ Reputation and permissions are **contract checks, not server policy**:
 |---|---|
 | Forge package | `0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1` |
 | ForgeRegistry (shared) | `0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02` |
-| **Playground package (v9)** | `0x1fac353343e74dbf2757d6ea475127fcafc6dadbcf3737b4116f365eb7fbb61e` |
+| **Latest upgrade — all writes target this (v12)** | `0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5` |
 | StarRegistry · BuilderBoard · FlagRegistry | `0xa20bdff4…1167e2` · `0xec1eeaf5…c62fa2f` · `0x48068f76…5268a046` |
 | NameRegistry · Treasury | `0xf802954a…d8b62f10` · `0x9062ed0b…d89ad921` |
 | ForkRegistry · PrivacyRegistry | `0xc774e8ca…d753909` · `0x1c331210…f8ecd20f` |
+| ReliabilityLedger (agent SLA) | `0x15fdb90609f55671830f285b2595463503b2e3e5310fa3d9f2789770b14c1973` |
 | Web (Walrus Site) | site `0x38d99f627aff840d309628f1b1478d4533654fab7117ed030a3dccb5125d2b97` · subdomain `1f0c5k3c47udwnlh4a978yhmzqyt0drtnbgcdoo95ag27jgb6f` |
 
 ### Sui mainnet
@@ -177,7 +178,10 @@ Reputation and permissions are **contract checks, not server policy**:
 | ForkRegistry · PrivacyRegistry | `0x37f94756…d9aff6b7` · `0xe8603766…8ef19935` |
 
 Full ids for both networks (plus the upgrade chain) live in `move/signet/deployments.json`
-and `web/shared.js`.
+and `web/shared.js`. The testnet package is on its **12th upgrade**: v10 added bounty
+dispute/arbitration + on-chain agent SLA (`ReliabilityLedger`), v11 added app version history
+(diff / rollback / remix-from-version via `AppUpdatedV2`), and v12 added the `payment` module
+(payment links / invoices). Event types stay under the original ids; writes target v12.
 
 **Move Registry (MVR):** the package is published under the intended alias `@signet/forge`
 (`mvrName` in `deployments.json`). Once registered against a SuiNS name via
@@ -305,6 +309,14 @@ Sui fullnode RPC and the Walrus aggregator. The same files get published to Walr
 static host works — e.g. `cd web && npx vercel --prod`, Root Directory `web`, Framework Preset
 Other, empty build command; `web/vercel.json` enables clean URLs.)
 
+A marketing **landing page** lives at `/` (`web/landing.html`, with live on-chain stats, an
+interactive in-browser release verifier, and live-rendered Playground apps); the app itself is at
+`/index.html` (`/app`) — `web/vercel.json` rewrites `/` → the landing.
+
+**Dev tooling:** `npm run dev:doctor` checks the Sui CLI, package ids, Walrus endpoints and the
+optional `sponsor / salt / portal / indexer` services in one shot. A starter template lives in
+`examples/create-signet-app` (wallet connect, publish, verify, and payment-link examples).
+
 ---
 
 ## CLI reference
@@ -319,18 +331,23 @@ npm i -g @signet/cli && forge <command>   # or global `forge` / `signet`
 | Command | What it does |
 |---|---|
 | `forge init --name <n> --dir <path>` | create a repo + snapshot the directory to Walrus |
+| `forge import --url <github-url> [--branch <b>]` | import a GitHub repo: clone → snapshot → Walrus → on-chain repo |
 | `forge push-snapshot --repo <id> --dir <path>` | push a new source snapshot / update the ref |
 | `forge grant-agent --recipient <addr> [--scopes …]` | mint a scoped, expiring AgentCap |
 | `forge revoke-agent --cap <id>` | revoke an AgentCap (instant kill-switch) |
 | `forge open-pr --cap <id> --title <t> --dir <path>` | agent opens a PR from a snapshot |
 | `forge review --cap <id> --pr <id> --report <file>` | submit a signed review (APPROVE/REJECT) |
 | `forge merge --pr <id>` | owner merges (aborts below `min_approvals`) |
+| `forge close-pr --pr <id>` | owner closes an open PR without merging |
 | `forge release --tag <v> --artifact <file> --report <file> [--pr <merged-pr-id>]` | publish a release; `--pr` records the v2 direct PR → release link |
 | `forge set-approvals --n <k>` | require k APPROVE reviews before merge |
 | `forge vouch --subject <addr>` | raise an agent's trust score |
 | `forge verify --release <id>` | independent provenance check (no key) — prints SLSA level |
 | `forge attestation --release <id> [--out file.json]` | export an in-toto/SLSA-style release statement |
+| `forge prove-file --release <id> --path <p>` | Merkle inclusion proof — prove one file is in a release without downloading the whole archive |
 | `forge latest-release` | resolve the newest release on the active network |
+| `forge post-bounty-v2` · `claim-bounty` · `open-dispute` · `resolve-dispute` · `cancel-expired` | bounty escrow with deadlines + proof, and owner-arbitrated disputes (partial payout, fee → treasury) |
+| `forge renew --app <id>` | re-pin a published app's Walrus blobs for more storage epochs |
 | `forge doctor` | environment / config health check |
 | `forge status` | repos / PRs / releases overview |
 
@@ -440,6 +457,12 @@ So the code that was reviewed is provably the code that was released. It prints 
 and a **SLSA-style level**: L1 (source+artifact) · L2 (+ signed review) · L3 (+ full chain
 matches). No key, no account, no trust in us.
 
+**Per-file Merkle proofs.** Each snapshot manifest also carries a `merkleRoot` over the file
+leaves, so you can prove a *single* file belongs to a release with an O(log n) inclusion proof —
+without downloading the whole archive. `forge prove-file --release <id> --path <p>` (and the **⛓
+prove** button on each file in the web file tree) recompute and check the proof against the
+on-chain-anchored root.
+
 ---
 
 ## Backend P0 services (optional)
@@ -484,6 +507,18 @@ tree-hash against the chain on every request, with graceful expired-bytes handli
 cd server/portal && npm install && PUBLIC_ORIGIN=https://your.domain npm start   # :8790
 ```
 Set the portal URL in Playground **settings** → 🔗 Share then emits `<portal>/app/<id>`.
+
+### `server/importer` — one-click **Import from GitHub**
+Keyless. Browsers can't clone a repo or build a CLI-compatible snapshot (CORS + format), so this
+service does it server-side: shallow-clone → `buildSnapshot` (the *same* code the CLI uses, so the
+tree hash is byte-identical and verifiable) → upload to Walrus → return the blob ids. It **signs
+nothing** — the web app then signs `forge::create_repo` with the returned manifest. SSRF-guarded
+(only `https://github.com/<owner>/<repo>`), shallow clone, `MAX_FILES` cap.
+```sh
+cd server/importer && npm install && FORGE_NETWORK=testnet npm start   # :8795
+```
+Set `importProxyUrl` in `web/shared.js` to enable the **⭳ Import from GitHub** button (otherwise
+the UI shows the `forge import` CLI command).
 
 ### `server/src` - Hosted Gateway + webhooks
 The indexer is also the hosted Gateway. It polls Sui events into SQLite, then exposes cache
@@ -634,6 +669,22 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 - **App gallery** — on-chain visits / stars / tips / remix lineage + moderation; unfakeable.
 - **Onboarding** — zkLogin + sponsored tx + LLM proxy: usable with no wallet, no gas, no key.
 
+### How it compares
+
+Measured against public Sui-ecosystem code (Magma — CLMM DeFi; zktx-io — Walrus-site provenance):
+
+- **vs Magma** — Magma is a focused, audited CLMM DEX: modular Move packages, a dedicated math
+  library, a polished TS SDK, and a public `audit-reports` repo. Signet matches the engineering
+  hygiene (capability model, named error codes, 65 Move tests) and is **broader** — provenance +
+  reputation/SLA + bounties/disputes + payments + an AI Playground in one package. Magma gates
+  calls to deprecated package versions on-chain; Signet uses additive, non-breaking upgrades and
+  always resolves the latest package (trade-off documented in [SECURITY.md](SECURITY.md)).
+- **vs zktx-io** — their provenance is SLSA3 attestation generated in CI (`.intoto.jsonl`, keyless
+  GitSigner) and verified at notary.wal.app. Signet's provenance is **on-chain-anchored** (repo →
+  PR → reviews/CI → release) with independent `verify` and per-file **Merkle inclusion proofs** —
+  a different, complementary axis. We adopt their security posture: a public
+  [SECURITY.md](SECURITY.md) with a coordinated-disclosure policy.
+
 ---
 
 ## Who it's for
@@ -671,6 +722,10 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 - The sponsor only co-signs value-free, allowlisted calls; value transfers are never sponsored.
 - The salt service verifies the OIDC JWT before issuing a salt; `SALT_SECRET` is a master key.
 - All user/LLM/on-chain text is escaped before rendering; toasts use `textContent`.
+
+See **[SECURITY.md](SECURITY.md)** for the full security model: per-module on-chain invariants,
+the capability-scope matrix, known risks (incl. mainnet key rotation), and how to report a
+vulnerability.
 
 ---
 

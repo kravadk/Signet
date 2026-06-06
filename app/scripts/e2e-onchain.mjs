@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { Transaction } from '@mysten/sui/transactions';
 import {
   loadKeypairFromKeystore, makeContextWithKeypair, writePkg,
-  createRepo, grantAgentCap, openPrAsAgent, submitReviewAsAgent, mergePr,
+  createRepo, grantAgentCap, openPrAsAgent, submitReviewAsAgent, mergePr, closePr,
   publishRelease, postBountyV2, claimBounty, openDispute, resolveDispute,
   createdOfType, SCOPE_OPEN_PR, SCOPE_REVIEW,
 } from '../src/lib/sui.ts';
@@ -62,6 +62,16 @@ async function snapshotBlob(dir, name, files) {
     res = await openPrAsAgent(ctx, { repoId, reputationId, agentCapId, headSnapshot: m1, diffManifest: m1, title: 'e2e: add f()' });
     const prId = createdOfType(res, '::pull_request::PullRequest')[0];
     ok(!!prId, 'open-pr', prId);
+
+    // 3b) open a SECOND PR and close it without merging (owner) — real close_pr surface
+    res = await openPrAsAgent(ctx, { repoId, reputationId, agentCapId, headSnapshot: m1, diffManifest: m1, title: 'e2e: pr to close' });
+    const prCloseId = createdOfType(res, '::pull_request::PullRequest')[0];
+    ok(!!prCloseId, 'open-pr (for close)', prCloseId);
+    res = await closePr(ctx, { repoId, prId: prCloseId, ownerCapId });
+    ok(res.effects?.status?.status === 'success', 'close-pr', res.digest);
+    const closedObj = await ctx.client.getObject({ id: prCloseId, options: { showContent: true } });
+    const closedStatus = Number(closedObj?.data?.content?.fields?.status);
+    ok(closedStatus === 2, 'PR status == closed (2)', `status=${closedStatus}`);
 
     // 4) signed review (approve) with a CI report blob
     const reportBlob = (await storeBlobAuto('e2e: sui move test -> OK. Total tests: 60; passed: 60')).blobId;

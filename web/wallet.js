@@ -588,6 +588,13 @@ export async function actMergePr(repoId, prId, ownerCapId, reputationId) {
   await signAndRun(tx, 'PR merged');
 }
 
+/** Close an OPEN PR without merging (owner only). */
+export async function actClosePr(repoId, prId, ownerCapId) {
+  const tx = new Transaction();
+  pkgCall(tx, 'pull_request::close_pr', [tx.object(repoId), tx.object(prId), tx.object(ownerCapId)]);
+  await signAndRun(tx, 'PR closed');
+}
+
 /** Find the shared RepoReputation ledger for a repo (created in the RepoCreated tx). */
 async function findLedger(repoId) {
   const ev = await sui.queryEvents({
