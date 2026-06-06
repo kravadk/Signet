@@ -40,6 +40,7 @@ events — re-checkable by anyone, not a screenshot.
 - [Backend P0 services (optional)](#backend-p0-services-optional)
 - [Hosted Gateway + webhooks](#hosted-gateway--webhooks)
 - [Automation](#automation)
+- [Operations & hardening](#operations--hardening)
 - [Testing and quality gates](#testing-and-quality-gates)
 - [Why Sui + Walrus](#why-sui--walrus)
 - [What makes it different](#what-makes-it-different)
@@ -413,7 +414,9 @@ The static SPA reads directly from Sui and Walrus, but the read path is now tran
 - `web/data-source.js` exposes `json-rpc`, `graphql`, and `grpc` request modes.
 - `?graphql=1` performs real GraphQL reads for events, objects and balances where the Sui
   GraphQL schema supports the required shape.
-- `?grpc=1` is explicit about the browser gRPC gap and falls back to JSON-RPC.
+- `?grpc=1` attempts **real** `@mysten/sui` gRPC reads (Core API: balance/objects) and falls back
+  to JSON-RPC with the actual error if the browser/endpoint can't reach it. The gRPC Core API has
+  no event query, so events stay on JSON-RPC (stated honestly, never faked).
 - The UI shows `Live RPC`, `GraphQL`, `Indexer cache`, or `Degraded` instead of silently hiding
   partial data.
 - CLI/MCP-side event scans expose partial/cursor/error metadata instead of repeated first-page
@@ -618,6 +621,25 @@ and [`.github/SELF-AUDIT.md`](.github/SELF-AUDIT.md) are checked by `scripts/mai
 
 ---
 
+## Operations & hardening
+
+Production concerns are built in and **degrade-safe** — every integration no-ops when unconfigured,
+so nothing is required to run locally:
+
+- **Rate limiting** — per-IP on all HTTP services, env-tunable via `RATE_LIMIT_PER_MIN` (disabled at
+  `<=0`; only rejects over the limit, returns `429 Retry-After`).
+- **Metrics** — Prometheus `/metrics` (`signet_*` counters) on the gateway, salt, portal, importer.
+- **Health/status** — `/health` on every service; public `/status` on the gateway and portal.
+- **Error tracking** — env-gated: always logs structured errors, additionally POSTs to
+  `ERROR_TRACKING_DSN` (alias `ERROR_DSN`/`SENTRY_DSN`) when set, else a pure no-op.
+- **Security headers** (`web/vercel.json`) — CSP (report-only first), HSTS, `X-Frame-Options`,
+  `frame-ancestors 'self'`, `nosniff`, Referrer/Permissions-Policy.
+- **Mainnet/audit-readiness** — `.github/MAINNET-RUNBOOK.md` (preflight, key rotation → multisig,
+  rollback/communication), `scripts/mainnet-readiness-check.mjs`, and the threat→mitigation→test map
+  in [SECURITY.md](SECURITY.md). No deploy is automated; mainnet is a manual, approved step.
+
+---
+
 ## Testing and quality gates
 
 The repo keeps the proof suite visible. Current local acceptance after the ecosystem-gap pass:
@@ -629,18 +651,21 @@ npm --prefix server run typecheck
 node --test server/salt/salt.test.mjs
 node --test server/sponsor/sponsor.test.mjs
 node --test server/portal/inliner.test.mjs
-sui move test --path move/signet              # 65/65
-npm run test:e2e                              # 14/14, desktop + mobile
-npm run coverage                              # text + html coverage report
+sui move test --path move/signet              # 66/66 incl. payment escrow value-conservation invariant
+npm run test:e2e                              # 20/20, desktop + mobile
+npm --prefix app run e2e:onchain              # 18/18 real testnet (needs a funded keystore key)
+npm run coverage                              # text + html coverage report (c8)
 Get-ChildItem web -Filter *.js | ForEach-Object { node --check $_.FullName }
 node --experimental-sqlite server/scripts/reindex.mjs --dry-run
 ```
 
 Playwright covers critical user flows with a mock wallet and mock RPC: anonymous navigation,
-wallet connect/disconnect, account/network changes, rejected signatures, RPC outage, GraphQL
-fallback/source badge, payment creation, and open/paid/cancelled/expired payment states.
+wallet connect/disconnect, account/network changes, rejected signatures, RPC outage, GraphQL +
+gRPC source badge, mid-flow refresh recovery, open-without-a-wallet, payment creation, and
+open/paid/cancelled/expired payment states.
 
-CI uploads coverage and Playwright reports as artifacts.
+CI uploads coverage and Playwright reports as artifacts, and runs **CodeQL** (SAST) + **OpenSSF
+Scorecard** + **Dependabot** for supply-chain hygiene.
 
 ---
 
@@ -748,6 +773,8 @@ vulnerability.
 ---
 
 ## Docs
+- **[FUNCTIONS.md](FUNCTIONS.md)** — exhaustive function/API reference (Move modules, CLI, MCP, SDK, web, services).
+- **[SECURITY.md](SECURITY.md)** — security model, per-module invariants, capability matrix, disclosure.
 - `server/*/README.md` — per-service setup for the onboarding accelerators.
 
 ---
