@@ -97,7 +97,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') { res.writeHead(200); return res.end(JSON.stringify({ ok: true })); }
   if (req.method === 'POST' && (req.url === '/import' || req.url === '/')) {
     metrics.inc('requests_total');
-    if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — clones are expensive, slow down' })); }
+    if (await limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — clones are expensive, slow down' })); }
     try {
       const { url, branch } = JSON.parse((await readBody(req)) || '{}');
       if (!url) { res.writeHead(400); return res.end(JSON.stringify({ error: 'url required' })); }

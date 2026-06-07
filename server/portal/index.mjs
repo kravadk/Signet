@@ -271,7 +271,7 @@ const server = createServer(async (req, res) => {
     // Rate-limit everything except liveness/metrics probes (degrade-safe).
     if (u.pathname !== '/health' && u.pathname !== '/status') {
       metrics.inc('requests_total');
-      if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'content-type': 'application/json', 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — slow down a moment' })); }
+      if (await limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.writeHead(429, { 'content-type': 'application/json', 'Retry-After': '60' }); return res.end(JSON.stringify({ error: 'rate limit — slow down a moment' })); }
     }
     if (u.pathname === '/health') {
       const rpc = await rpcStatus().catch(() => ({}));

@@ -564,9 +564,36 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((req, res, next) => {
+// Optional distributed backend (Upstash Redis REST) so the limit holds across instances.
+// Unset → in-memory. Fail-open: any error → null → fall back to the local map.
+const RL_REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.RATE_LIMIT_REDIS_URL || "";
+const RL_REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.RATE_LIMIT_REDIS_TOKEN || "";
+async function rlRedisOver(ip: string, max: number, windowSec: number): Promise<boolean | null> {
+  if (!RL_REDIS_URL || !RL_REDIS_TOKEN) return null;
+  try {
+    const key = `gw:${ip}`;
+    const r = await fetch(`${RL_REDIS_URL}/pipeline`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${RL_REDIS_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify([["INCR", key], ["EXPIRE", key, String(windowSec), "NX"]]),
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!r.ok) return null;
+    const out: any = await r.json();
+    const n = Number(Array.isArray(out) ? out[0]?.result : out?.result);
+    return Number.isFinite(n) ? n > max : null;
+  } catch { return null; }
+}
+
+app.use(async (req, res, next) => {
   if (RATE_LIMIT_MAX <= 0 || req.path === "/metrics" || req.path === "/health" || req.path === "/api/health") return next();
   const ip = clientIp(req);
+  const windowSec = Math.max(1, Math.ceil(RATE_LIMIT_WINDOW_MS / 1000));
+  const overRedis = await rlRedisOver(ip, RATE_LIMIT_MAX, windowSec);
+  if (overRedis !== null) {
+    if (overRedis) { res.setHeader("Retry-After", String(windowSec)); return res.status(429).json({ error: "rate_limited" }); }
+    return next();
+  }
   const now = Date.now();
   const hit = rateHits.get(ip);
   if (!hit || now > hit.resetAt) {

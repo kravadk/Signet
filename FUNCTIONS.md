@@ -132,7 +132,8 @@ Each service is self-contained, env-tunable, and degrade-safe (the app works wit
 
 ## 7. Operations & hardening (env-gated)
 
-- **Rate limiting:** per-IP, `RATE_LIMIT_PER_MIN` (degrade-safe — disabled at `<=0`, only rejects over the limit). Active on gateway, sponsor, salt, portal, importer, llm-proxy.
+- **Rate limiting:** per-IP, `RATE_LIMIT_PER_MIN` (degrade-safe — disabled at `<=0`, only rejects over the limit). Active on gateway, sponsor, salt, portal, importer, llm-proxy. **Distributed** across instances when `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (alias `RATE_LIMIT_REDIS_URL`/`_TOKEN`) are set (fixed-window `INCR`+`EXPIRE` over HTTPS); unset → in-memory; any Redis error → **fail-open** to in-memory.
+- **Walrus freshness:** `renew.yml` (weekly) re-pins published app blobs so they don't expire; `seed.yml` (weekly, needs `FORGE_SEED_KEY`) keeps the gallery non-empty. Already-expired blobs can't be recovered — the landing shows a graceful "archive expired · on-chain record ✓" card.
 - **Error tracking:** `captureError` — always logs; additionally POSTs to `ERROR_TRACKING_DSN` (alias `ERROR_DSN`/`SENTRY_DSN`) when set, else no-op.
 - **Metrics:** Prometheus `/metrics` (`signet_*` counters + `signet_up`) on gateway, salt, portal, importer.
 - **Health/status:** `/health` on every service; public `/status` on gateway + portal.

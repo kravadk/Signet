@@ -100,7 +100,7 @@ const server = createServer(async (req, res) => {
   }
   if (req.method !== 'POST' || req.url !== '/salt') return json(res, 404, { error: 'not found' });
   metrics.inc('requests_total');
-  if (limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.setHeader('Retry-After', '60'); return json(res, 429, { error: 'rate limit — slow down a moment' }); }
+  if (await limited(clientIp(req))) { metrics.inc('rate_limited_total'); res.setHeader('Retry-After', '60'); return json(res, 429, { error: 'rate limit — slow down a moment' }); }
   let body;
   try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'invalid JSON' }); }
   if (!body || typeof body.jwt !== 'string') return json(res, 400, { error: 'jwt required' });

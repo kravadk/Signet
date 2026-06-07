@@ -34,9 +34,26 @@ if (!API_KEY) {
   process.exit(1);
 }
 
-// ---- per-IP sliding-window rate limit (in-memory; swap for Redis at scale) ----
+// ---- per-IP rate limit: distributed via Upstash Redis REST when configured, else in-memory ----
 const hits = new Map(); // ip -> { count, resetAt }
-function rateLimited(ip) {
+const R_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.RATE_LIMIT_REDIS_URL || '';
+const R_TOK = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.RATE_LIMIT_REDIS_TOKEN || '';
+async function redisOver(ip) {
+  if (!R_URL || !R_TOK) return null;
+  try {
+    const key = `llm:${ip}`;
+    const r = await fetch(`${R_URL}/pipeline`, {
+      method: 'POST', headers: { authorization: `Bearer ${R_TOK}`, 'content-type': 'application/json' },
+      body: JSON.stringify([['INCR', key], ['EXPIRE', key, '60', 'NX']]), signal: AbortSignal.timeout(1500),
+    });
+    if (!r.ok) return null;
+    const out = await r.json(); const n = Number(Array.isArray(out) ? out[0]?.result : out?.result);
+    return Number.isFinite(n) ? n > RATE_LIMIT_PER_MIN : null;
+  } catch { return null; }
+}
+async function rateLimited(ip) {
+  const viaRedis = await redisOver(ip);
+  if (viaRedis != null) return viaRedis;
   const now = Date.now();
   const rec = hits.get(ip);
   if (!rec || now > rec.resetAt) { hits.set(ip, { count: 1, resetAt: now + 60_000 }); return false; }
@@ -83,7 +100,7 @@ const server = createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/llm') return json(res, 404, { error: 'not found' });
 
   const ip = clientIp(req);
-  if (rateLimited(ip)) return json(res, 429, { error: 'rate limit — slow down a moment' });
+  if (await rateLimited(ip)) return json(res, 429, { error: 'rate limit — slow down a moment' });
 
   let body;
   try { body = JSON.parse(await readBody(req)); }

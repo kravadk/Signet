@@ -112,12 +112,32 @@ function noteReject(reason) {
   metrics.rejected += 1;
   metrics.rejectedByReason.set(reason, (metrics.rejectedByReason.get(reason) || 0) + 1);
 }
-function rateLimited(ip) {
+// Optional distributed backend (Upstash Redis REST) so per-minute limits hold across
+// instances. Unset → in-memory. Fail-open: any error → fall back to the local map.
+const R_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.RATE_LIMIT_REDIS_URL || '';
+const R_TOK = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.RATE_LIMIT_REDIS_TOKEN || '';
+async function redisOver(key, perMin) {
+  if (!R_URL || !R_TOK) return null;
+  try {
+    const r = await fetch(`${R_URL}/pipeline`, {
+      method: 'POST', headers: { authorization: `Bearer ${R_TOK}`, 'content-type': 'application/json' },
+      body: JSON.stringify([['INCR', key], ['EXPIRE', key, '60', 'NX']]), signal: AbortSignal.timeout(1500),
+    });
+    if (!r.ok) return null;
+    const out = await r.json(); const n = Number(Array.isArray(out) ? out[0]?.result : out?.result);
+    return Number.isFinite(n) ? n > perMin : null;
+  } catch { return null; }
+}
+async function rateLimited(ip) {
+  const viaRedis = await redisOver(`sp:ip:${ip}`, RATE_LIMIT_PER_MIN);
+  if (viaRedis != null) return viaRedis;
   const now = Date.now(); const r = hits.get(ip);
   if (!r || now > r.resetAt) { hits.set(ip, { count: 1, resetAt: now + 60_000 }); return false; }
   r.count += 1; return r.count > RATE_LIMIT_PER_MIN;
 }
-function walletRateLimited(sender) {
+async function walletRateLimited(sender) {
+  const viaRedis = await redisOver(`sp:w:${sender}`, WALLET_RATE_LIMIT_PER_MIN);
+  if (viaRedis != null) return viaRedis;
   const now = Date.now(); const r = walletHits.get(sender);
   if (!r || now > r.resetAt) { walletHits.set(sender, { count: 1, resetAt: now + 60_000 }); return false; }
   r.count += 1; return r.count > WALLET_RATE_LIMIT_PER_MIN;
@@ -174,8 +194,8 @@ function inspectKind(tx) {
 }
 
 async function enforceQuotas({ ip, sender, calls }) {
-  if (rateLimited(ip)) throw new Error('rate limit: ip per minute');
-  if (walletRateLimited(sender)) throw new Error('rate limit: wallet per minute');
+  if (await rateLimited(ip)) throw new Error('rate limit: ip per minute');
+  if (await walletRateLimited(sender)) throw new Error('rate limit: wallet per minute');
   if (getDaily('ip', ip) >= IP_DAILY_LIMIT) throw new Error('quota: ip daily');
   if (getDaily('wallet', sender) >= WALLET_DAILY_LIMIT) throw new Error('quota: wallet daily');
   if (metrics.spendEstimatedMist + GAS_BUDGET > DAILY_BUDGET_MIST) throw new Error('quota: daily sponsor budget');
