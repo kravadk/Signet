@@ -31,6 +31,7 @@ import {
   submitReviewAsAgent,
   mergePr,
   closePr,
+  transferObject,
   publishRelease,
   vouch,
   setMinApprovals,
@@ -366,6 +367,21 @@ program
     const s = loadState(opts.dir);
     const res = await closePr(ctx, { repoId: s.repoId, prId: opts.pr, ownerCapId: s.ownerCapId });
     console.log(`✓ PR closed\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("transfer-owner")
+  .description("Transfer a repo's RepoOwnerCap to a new owner (clean key / multisig) — rotates control off a single/compromised key")
+  .requiredOption("--to <address>", "new owner address (e.g. a multisig)")
+  .option("--cap <id>", "RepoOwnerCap object id (defaults to ./.signet)")
+  .option("-d, --dir <dir>", "repo dir", ".")
+  .action(async (opts) => {
+    const ctx = makeContext(NET);
+    const capId = opts.cap || loadState(opts.dir).ownerCapId;
+    if (!capId) { console.error("no --cap given and no ownerCapId in ./.signet"); process.exit(1); }
+    const res = await transferObject(ctx, { objectId: capId, to: opts.to });
+    console.log(`✓ OwnerCap ${capId} transferred\n  to: ${opts.to}\n  tx: ${res.digest}`);
+    console.log(`  (this signer can no longer act as owner of that repo)`);
   });
 
 program

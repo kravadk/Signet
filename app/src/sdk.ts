@@ -22,6 +22,7 @@ export {
   resolveDispute,
   cancelExpired,
   closePr,
+  transferObject,
   createPaymentRequest,
   payPaymentRequest,
   cancelPaymentRequest,

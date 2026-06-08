@@ -120,6 +120,34 @@ capability pattern are the primary controls; abort codes are the enforcement poi
 
 ---
 
+## Repository ownership & protection model
+
+What protects an imported/created repo, and what does not:
+
+- **Write authority is capability-gated, on-chain.** Only the holder of that repo's
+  `RepoOwnerCap` can `update_ref` / `merge_pr` / `close_pr` / `set_min_approvals` /
+  grant·revoke agent caps / `publish_release`. No address without the cap can mutate the
+  repo. Agents act only via a scoped, expiring `AgentCap` and **can never merge or release**.
+- **Integrity is tamper-evident.** Every snapshot is content-addressed (SHA-256 tree-hash +
+  Merkle root); any change to the anchored source is detectable by re-verification.
+- **Source is public, not confidential.** The snapshot lives in public Walrus and the manifest
+  is on-chain — anyone can read the code by blob id. This is by design (provenance must be
+  independently verifiable). Private repos would require a separate Seal-encryption flow
+  (currently only Playground apps support private mode).
+- **`RepoOwnerCap` is `key + store` → transferable.** Ownership can be rotated to a clean key
+  or, recommended for any real deployment, a **multisig** address with **no contract change**
+  (`forge transfer-owner --to <addr>`). This is how to make control "not depend on one key":
+  hold the cap (and the package `UpgradeCap`) in a k-of-n Sui multisig so a single compromised
+  key cannot take over.
+
+**Self-custody caveat:** a dApp cannot make an arbitrary user's key unhackable — each repo's
+owner is responsible for the key/multisig that holds its `RepoOwnerCap`. Signet provides the
+capability model, tamper-evidence, and the transfer/rotate path; key custody is the owner's.
+There is intentionally **no** in-contract DAO/timelock/auto-recovery (it would add audit surface
+and UX cost without proportionate benefit pre-mainnet); robustness comes from multisig custody.
+
+---
+
 ## Known risks & mitigations
 
 1. **Compromised deployer key (testnet).** The current testnet deployer/`UpgradeCap` holder key is

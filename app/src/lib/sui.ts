@@ -289,6 +289,18 @@ export async function closePr(
   return sign(ctx, tx);
 }
 
+/** Transfer an owned object (e.g. a `RepoOwnerCap`, which has `store`) to a new
+    address — used to rotate repo ownership onto a clean key or a multisig so
+    authority no longer sits on a single/compromised key. */
+export async function transferObject(
+  ctx: ForgeContext,
+  args: { objectId: string; to: string },
+) {
+  const tx = new Transaction();
+  tx.transferObjects([tx.object(args.objectId)], tx.pure.address(args.to));
+  return sign(ctx, tx);
+}
+
 export async function revokeAgentCap(
   ctx: ForgeContext,
   args: { repoId: string; ownerCapId: string; agentCapId: string },
