@@ -1,0 +1,29 @@
+name: keep-warm
+
+# Render's free tier spins a service down after ~15 min idle, so the first request
+# after that pays a 30-50s cold start. Ping each service's public /health every
+# 10 minutes so a judge (or any visitor) never hits a cold Build / sponsor / login.
+#
+# Caveat: GitHub's scheduled cron is best-effort and can be delayed several minutes
+# under load — for a guaranteed always-on path use a paid Render tier or an external
+# uptime pinger (UptimeRobot / cron-job.org). This keeps it warm for free most of the time.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping service health endpoints
+        run: |
+          for s in llm-proxy sponsor portal salt; do
+            url="https://signet-$s.onrender.com/health"
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 90 "$url" || echo "000")
+            echo "$s -> HTTP $code"
+          done
