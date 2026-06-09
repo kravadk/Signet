@@ -30,7 +30,27 @@ events — re-checkable by anyone, not a screenshot.
 
 ---
 
+## For judges — evaluate in ~90 seconds
+
+1. **Watch a release verify itself, zero setup** → **[signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify)**. It opens green: re-fetches the Walrus blobs, recomputes the SHA-256 tree-hash + a per-file Merkle proof, follows the chain, and reports **SLSA-style L3**. Share a specific one with `…/app#verify?release=<id>`.
+2. **Describe → AI builds → publish** → **[/app#playground](https://signet-sui.vercel.app/app#playground)**. An LLM builds an app live in the browser; Publish stores the bytes on Walrus and anchors a `PublishedApp` on Sui.
+3. **Real on-chain data, no database** → **[/app#repos](https://signet-sui.vercel.app/app#repos)**. 33 repositories read live from chain, including real GitHub imports (a 266 MB repo reduced to 12.5k source files). Every number in the app comes from Sui + Walrus.
+
+| | |
+|---|---|
+| **Live** | testnet **and** mainnet, both verified on-chain — [testnet pkg ↗](https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5) · [mainnet pkg ↗](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54) |
+| **On Walrus** | source snapshots, PR diffs, signed reviews, CI reports, release artifacts + manifests, app archives — content-addressed, tree-hash + Merkle |
+| **On Sui** | repos, PRs, reviews, releases, reputation, bounties, payments, apps — objects + events; every write gated by a capability |
+| **Agents** | MCP server, 22 tools; each bound to a scoped, expiring `AgentCap` — an agent can propose and review but **never** merge or release |
+| **Tests** | Move 66/66 · on-chain e2e 18/18 · Playwright 20/20 · app 17/17 · server 17/17, all reproducible |
+| **Stack** | Sui Move (8 modules) · Walrus · Seal · zkLogin · MCP · static JS SPA (no framework, no build step) |
+
+**Why it's different:** an agent's work is normally unverifiable — screenshots and trust. Signet makes the whole chain **Repo → PR → Reviews/CI → Release** content-addressed on Walrus and anchored on Sui, so anyone re-derives the proof with no key and no trust in us. Permissions are capabilities, not an allow-list; reputation is `public(package)` bump-only, so scores can't be forged off-chain.
+
+---
+
 ## Table of contents
+- [For judges](#for-judges--evaluate-in-90-seconds)
 - [Playground](#playground)
 - [Release network](#release-network)
 - [Trust model](#trust-model)
