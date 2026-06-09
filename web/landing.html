@@ -74,7 +74,7 @@
       </div>
       <div class="badges">
         <span class="badge"><span class="lv"></span> testnet <b>LIVE</b></span>
-        <span class="badge">package <b>v12</b></span>
+        <a class="badge" href="https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5" target="_blank" rel="noreferrer">package <b>v12</b> ↗</a>
         <span class="badge">Move <b>66/66</b> tests</span>
         <span class="badge"><b>Walrus</b>-backed</span>
         <span class="badge"><b>MCP</b>-ready</span>
@@ -149,6 +149,25 @@
         <div class="step reveal"><div class="n">4</div><h3>CI report</h3><p><span class="mono">sui move test</span> runs, the report is stored to Walrus and linked to the PR.</p></div>
         <div class="step reveal"><div class="n">5</div><h3>Release</h3><p>The owner publishes a release that hard-links the merged PR → source → artifact → report. Anyone re-verifies.</p></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ============== WALRUS ============== -->
+  <section id="walrus">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="kicker">How we use Walrus</span>
+        <h2>The bytes live on Walrus. Sui anchors them.</h2>
+        <p>Walrus isn't a sidecar — it's where every artifact that makes a release verifiable actually lives, content-addressed and re-fetchable by id.</p>
+      </div>
+      <img class="arch reveal" src="architecture.svg" alt="Signet architecture: a provenance chain on Sui, with each step's bytes stored content-addressed on Walrus, independently verifiable" loading="lazy" />
+      <ul class="walrus-list reveal">
+        <li><b>Source snapshots &amp; diffs</b> — the full file tree (gzipped) and each PR's changed files, carrying a SHA-256 tree-hash.</li>
+        <li><b>Signed reviews &amp; CI reports</b> — review verdicts and <span class="mono">sui move test</span> output, anchored to the PR on-chain.</li>
+        <li><b>Release artifacts &amp; manifests</b> — the build artifact plus a manifest with the tree-hash and a per-file Merkle root.</li>
+        <li><b>Playground app archives</b> — every published app's bytes, re-served from Walrus and Seal-encrypted when private.</li>
+      </ul>
+      <p class="walrus-foot reveal">Verification re-fetches each blob by id, recomputes the tree-hash, and checks a Merkle inclusion proof — so anyone confirms a release came from the reviewed source, with no trust in us. A weekly renew keeps the blobs alive.</p>
     </div>
   </section>
 

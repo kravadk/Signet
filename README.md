@@ -5,10 +5,13 @@
 [![Sui](https://img.shields.io/badge/Sui-testnet%20%2B%20mainnet-4da2ff.svg)](#live-deployments)
 [![API reference](https://img.shields.io/badge/API-FUNCTIONS.md-46d18a.svg)](FUNCTIONS.md)
 [![Security](https://img.shields.io/badge/security-SECURITY.md-c0e6ff.svg)](SECURITY.md)
+[![Live demo](https://img.shields.io/badge/demo-signet--sui.vercel.app-c6f24e.svg)](https://signet-sui.vercel.app)
 
 **Describe an app → an AI builds it live → publish it to Walrus + Sui with verifiable provenance.**
 
 Built for **Sui Overflow 2026** · primary track: **Walrus** · secondary: **Agentic Web**.
+
+**Live:** [signet-sui.vercel.app](https://signet-sui.vercel.app) · **Verify a release yourself** (zero setup): [signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify) · **Contracts:** [testnet](https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5) · [mainnet](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54)
 
 Signet is two products sharing one trust layer:
 
@@ -22,6 +25,8 @@ Signet is two products sharing one trust layer:
 The release network is what makes the Playground's authorship and metrics trustworthy:
 everything is content-addressed in **Walrus** and anchored by **Sui** objects, capabilities and
 events — re-checkable by anyone, not a screenshot.
+
+![Signet — a provenance chain on Sui (Repo → PR → Reviews/CI → Release), with every artifact content-addressed on Walrus and independently verifiable](web/architecture.svg)
 
 ---
 

@@ -318,3 +318,14 @@ section { padding: 72px 0; position: relative; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .reveal { opacity: 1; transform: none; }
 }
+
+/* ============================================================
+   How we use Walrus (#walrus) — architecture diagram + list
+   ============================================================ */
+#walrus { padding: 64px 0; border-top: 1px solid var(--bd); }
+#walrus .arch { width: 100%; max-width: 880px; margin: 26px auto 30px; border: 1px solid var(--bd); border-radius: 8px; background: #0b0c0e; }
+.walrus-list { list-style: none; margin: 0 auto; padding: 0; max-width: 880px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
+.walrus-list li { position: relative; padding: 0 0 0 18px; color: var(--tx-2); font-size: 13.5px; line-height: 1.55; }
+.walrus-list li::before { content: "▸"; position: absolute; left: 0; color: var(--ink); }
+.walrus-foot { max-width: 880px; margin: 22px auto 0; color: var(--tx-3); font-size: 12.5px; line-height: 1.6; border-top: 1px dashed var(--bd); padding-top: 16px; }
+@media (max-width: 720px) { .walrus-list { grid-template-columns: 1fr; } }
