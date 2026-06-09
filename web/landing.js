@@ -137,6 +137,10 @@ async function loadReleases() {
     sel.innerHTML = [...releaseMap.entries()].map(([id, j]) =>
       `<option value="${id}">${esc(j.version || 'release')} · ${short(id)}</option>`).join('');
     btn.disabled = false;
+    // bind the hero card to the REAL latest release (most recent first), not a mock
+    const [topId, topJ] = [...releaseMap.entries()][0];
+    const ht = $('hcTitle'); if (ht) ht.textContent = `signet · release ${topJ.version || short(topId)}`;
+    return topId;
   } catch { sel.innerHTML = '<option>releases unavailable</option>'; }
 }
 function stepRow(state, label, detail) {
@@ -286,6 +290,22 @@ function initTilt() {
 
 /* ---------- boot ---------- */
 initNav(); initReveal(); initChain(); initTilt();
-loadStats(); loadTicker(); loadReleases(); loadApps();
+loadStats(); loadTicker(); loadApps();
 const vfBtn = $('vfRun');
 if (vfBtn) vfBtn.addEventListener('click', () => { const id = $('vfSelect')?.value; if (id && releaseMap.has(id)) verifyRelease(id); });
+// one-click verify: bind hero to the real latest, auto-run on a deep-link
+// (?release=<id|latest> or #verify=<id>), and let the hero "Verify a release" CTA verify in-place.
+loadReleases().then((latestId) => {
+  const run = (id) => {
+    if (!id || !releaseMap.has(id)) return;
+    const sel = $('vfSelect'); if (sel) sel.value = id;
+    document.getElementById('verifier')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    verifyRelease(id);
+  };
+  let want = new URLSearchParams(location.search).get('release')
+    || (location.hash.match(/verify=([^&]+)/) || [])[1] || '';
+  if (want === 'latest') want = latestId || '';
+  if (want) run(want);
+  const hv = $('heroVerify');
+  if (hv) hv.addEventListener('click', (e) => { if (latestId) { e.preventDefault(); run(latestId); } });
+});

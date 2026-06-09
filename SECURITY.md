@@ -169,9 +169,9 @@ and UX cost without proportionate benefit pre-mainnet); robustness comes from mu
 
 ## Test & verification coverage
 
-- **Move unit tests:** 65/65 passing (`sui move test --path move/signet`).
+- **Move unit tests:** 66/66 passing (`sui move test --path move/signet`).
 - **TS unit tests:** 17/17 (`npm --prefix app test`) incl. snapshot tree-hash + Merkle proofs.
-- **On-chain e2e (real testnet key):** 15/15 (`app/scripts/e2e-onchain.mjs`) — full chain
+- **On-chain e2e (real testnet key):** 18/18 (`app/scripts/e2e-onchain.mjs`) — full chain
   init → grant-agent → PR → review → merge → release → verify → bounty → dispute → reliability →
   payment create/pay.
 - **Browser e2e:** Playwright (chromium + mobile) with a mock wallet and RPC interception.

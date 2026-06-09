@@ -1897,6 +1897,9 @@ function renderActivityView() {
 }
 
 /* ---------- Verify view (Rekor-style independent verifier) ---------- */
+// Verify deep-link state: a judge hitting #verify (optionally ?release=<id>) should see a real
+// green check immediately instead of an empty "pick a release" prompt.
+let pendingVerifyId = null, verifyAutoRan = false;
 function renderVerifyView() {
   const sel = $('verifySelect');
   if (!sel) return;
@@ -1909,7 +1912,17 @@ function renderVerifyView() {
     '<option value="' + r.id + '">' + escapeHtml(r.version) + ' · ' +
       escapeHtml(STATE.repoNameById.get(r.repoId) || short(r.repoId)) + '</option>'
   ).join('');
-  $('verifyOut').innerHTML = '<div class="empty-state">Pick a release and click Verify to re-check its provenance chain independently.</div>';
+  // default to the deep-linked release, else the most recent — and auto-verify it the first time
+  // the view opens (or on a deep-link) so the proof is visible with zero clicks.
+  const want = (pendingVerifyId && STATE.releases.some((r) => r.id === pendingVerifyId))
+    ? pendingVerifyId : STATE.releases[0].id;
+  sel.value = want;
+  if (pendingVerifyId || !verifyAutoRan) {
+    verifyAutoRan = true; pendingVerifyId = null;
+    runVerify(want, $('verifyOut'), null);
+  } else {
+    $('verifyOut').innerHTML = '<div class="empty-state">Pick a release and click Verify to re-check its provenance chain independently.</div>';
+  }
 }
 
 async function runVerify(releaseId, hostEl, btnEl) {
@@ -2478,15 +2491,22 @@ document.addEventListener('wf:data-loaded', async () => {
 }, { once: false });
 // Playground is the product's front door; if the URL has #<view>, honor it.
 {
-  const initial = (location.hash || '').replace('#', '');
+  const raw = (location.hash || '').replace('#', '');
+  const [initial, hq] = raw.split('?');
   const startView = VIEW_TITLES[initial] ? initial : 'playground';
+  const rel = new URLSearchParams(hq || location.search.replace(/^\?/, '')).get('release');
+  if (rel) pendingVerifyId = rel;
   showView(startView);
   const navEl = document.querySelector(`[data-nav="${startView}"]`);
   if (navEl) { document.querySelectorAll('[data-nav]').forEach((x) => x.classList.remove('active')); navEl.classList.add('active'); }
 }
 // Honor back/forward and manual hash edits (deep-linking). Ignore junk/OAuth fragments.
 window.addEventListener('hashchange', () => {
-  const v = (location.hash || '').replace('#', '');
-  if (VIEW_TITLES[v]) { showView(v); activateNav(v); }
+  const [v, q] = (location.hash || '').replace('#', '').split('?');
+  if (VIEW_TITLES[v]) {
+    const rel = new URLSearchParams(q || '').get('release');
+    if (rel) pendingVerifyId = rel;
+    showView(v); activateNav(v);
+  }
 });
 loadData();

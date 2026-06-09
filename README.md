@@ -210,7 +210,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/signet/      Sui Move contracts (the trust layer) - 8 modules, 65 tests
+move/signet/      Sui Move contracts (the trust layer) - 8 modules, 66 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -226,7 +226,7 @@ move/signet/      Sui Move contracts (the trust layer) - 8 modules, 65 tests
                          · update_app (versioning) · publish_remix_v3 · AppBounty (post/award/cancel)
                          · ForkRegistry (set_fork_price / pay_to_fork) · PrivacyRegistry
                          · seal_approve_app_owner / seal_approve_app_member (Seal private apps)
-  tests/                 65 tests across forge + playground + payment
+  tests/                 66 tests across forge + playground + payment
 
 app/                   TypeScript CLI + SDK + MCP server + CI worker
   src/lib/*.ts           walrus / snapshot / sui (PTBs) / forge-read / actions (verifyRelease)
@@ -299,7 +299,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 ### Contracts
 ```sh
 cd move/signet
-sui move test          # 65/65 pass
+sui move test          # 66/66 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
 
@@ -695,7 +695,7 @@ Measured against public Sui-ecosystem code (Magma — CLMM DeFi; zktx-io — Wal
 
 - **vs Magma** — Magma is a focused, audited CLMM DEX: modular Move packages, a dedicated math
   library, a polished TS SDK, and a public `audit-reports` repo. Signet matches the engineering
-  hygiene (capability model, named error codes, 65 Move tests) and is **broader** — provenance +
+  hygiene (capability model, named error codes, 66 Move tests) and is **broader** — provenance +
   reputation/SLA + bounties/disputes + payments + an AI Playground in one package. Magma gates
   calls to deprecated package versions on-chain; Signet uses additive, non-breaking upgrades and
   always resolves the latest package (trade-off documented in [SECURITY.md](SECURITY.md)).
@@ -723,7 +723,7 @@ Measured against public Sui-ecosystem code (Magma — CLMM DeFi; zktx-io — Wal
 
 ## Tech stack
 
-- **Contracts:** Sui Move (edition 2024), 8 modules, 65 tests; Seal access policy.
+- **Contracts:** Sui Move (edition 2024), 8 modules, 66 tests; Seal access policy.
 - **Storage:** Walrus (HTTP publisher/aggregator on testnet; `@mysten/walrus` SDK for owned blobs).
 - **App layer:** TypeScript - CLI (commander), typed SDK clients, `@mysten/sui` SDK,
   MCP server (stdio), CI worker, optional SQLite indexer/gateway.
@@ -751,14 +751,14 @@ vulnerability.
 
 ## Project status
 
-- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps + payment links); 65/65 tests.
+- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps + payment links); 66/66 tests.
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (22 tools) + CLI (14 commands) + typed SDK clients.
 - ✅ **Payment links + hosted gateway**: `PaymentRequest` Move module, QR/copy payment UI,
   paid/cancelled/expired states, `/payments` APIs, `payment.paid` webhooks and reverify anchors.
-- ✅ **Quality gates**: app tests 17/17 (incl. MCP stdio integration), server tests 14/14,
-  Move 65/65, Playwright 14/14, coverage and CI artifact uploads.
+- ✅ **Quality gates**: app tests 17/17 (incl. MCP stdio integration), server tests 17/17,
+  Move 66/66, Playwright 20/20, coverage and CI artifact uploads.
 - ✅ **Onboarding code** (LLM proxy, sponsor — E2E-tested on testnet; zkLogin + salt — salt
   unit-tested). Going live needs you to host the services + register a Google OAuth client + fund
   a sponsor wallet.
