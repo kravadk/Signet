@@ -21,7 +21,11 @@
 // NOTE: `npm run gen:web-config` overwrites this file with localhost URLs for the
 // local Docker/dev stack — do NOT commit that output; production stays empty.
 window.__WF_CONFIG = {
-  sponsorUrl: 'https://signet-sponsor.onrender.com/sponsor',
+  // Gas is user-paid by default: actions are signed by the user's wallet and cost a
+  // fraction of a cent (~0.002 SUI). Gasless sponsorship is an OPTIONAL accelerator —
+  // set sponsorUrl to a Sui Sponsored-Transactions endpoint (server/sponsor, or a
+  // managed gas station like Enoki) to re-enable it. (A Move contract can't pay gas.)
+  sponsorUrl: '',
   portalUrl: 'https://signet-portal.onrender.com',
   llmProxyUrl: 'https://signet-llm-proxy.onrender.com/llm',
   zkSaltUrl: 'https://signet-salt.onrender.com/salt',

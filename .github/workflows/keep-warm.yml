@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Ping service health endpoints
         run: |
-          for s in llm-proxy sponsor portal salt; do
+          for s in llm-proxy portal salt; do
             url="https://signet-$s.onrender.com/health"
             code=$(curl -s -o /dev/null -w "%{http_code}" -m 90 "$url" || echo "000")
             echo "$s -> HTTP $code"

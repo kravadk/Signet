@@ -746,10 +746,16 @@ async function renderSponsorDashboard() {
   const el = $('sponsorDash');
   if (!el) return;
   const url = sponsorDashboardUrl();
+  const panel = $('sponsorPanel');
   if (!url) {
-    el.innerHTML = '<div class="empty-state">Gas-free sponsorship isn\'t enabled on this deployment — actions are signed with your own wallet.</div>';
+    // Gas is user-paid by default — the sponsor is optional, so hide the whole panel
+    // rather than show a permanently "not enabled" card. Clear any skeleton first so no
+    // stale loader lingers in the DOM.
+    el.innerHTML = '';
+    if (panel) panel.style.display = 'none';
     return;
   }
+  if (panel) panel.style.display = '';
   el.innerHTML = '<div class="empty-state loading-pulse">Loading sponsor status...</div>';
   try {
     const d = await withTimeout(fetch(url).then((r) => {

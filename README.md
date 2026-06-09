@@ -119,9 +119,11 @@ Apps live on Walrus; the trust layer lives on Sui. The on-chain record is perman
 runnable *bytes* expire if storage isn't renewed — and the tree-hash means anyone can re-pin the
 exact same app and it still verifies.
 
-**Frictionless onboarding (optional):** three services in `server/` remove the wallet/gas/key
-friction — see [Backend P0 services](#backend-p0-services-optional). Sign in with Google
-(zkLogin) + a sponsor and you act with **no wallet and no gas**.
+**Onboarding:** by default you connect a Sui wallet and pay your own gas — a fraction of a cent
+(~0.002 SUI) per action. Three **optional** accelerators in `server/` remove the remaining friction
+(see [Backend P0 services](#backend-p0-services-optional)): a hosted LLM proxy (build with no API
+key), plus zkLogin + a gas sponsor (sign in with Google, act without holding SUI). A Move contract
+can't pay gas on Sui, so gasless is always an optional off-chain accelerator — never required.
 
 ---
 
@@ -520,8 +522,8 @@ SPONSOR_PRIVATE_KEY=suiprivkey1... ALLOWED_PACKAGES=0x1fac353343e74dbf2757d6ea47
 ### `server/salt` + `web/zklogin.js` — sign in with Google (no wallet)
 Stateless salt = `HMAC(SALT_SECRET, iss|aud|sub)` after verifying the Google `id_token`
 (RS256 vs JWKS, exp/iss/aud). The client runs the official Sui zkLogin flow (ephemeral key →
-Google → salt → `jwtToAddress` → proof from a zk prover → `zkSignAndExecute`). With the sponsor:
-**no wallet, no gas**.
+Google → salt → `jwtToAddress` → proof from a zk prover → `zkSignAndExecute`). Sign in with Google
+instead of a wallet extension; pair with an **optional** sponsor to also cover gas.
 ```sh
 cd server/salt && SALT_SECRET=<long-random> GOOGLE_CLIENT_ID=...apps.googleusercontent.com npm start  # :8789
 ```
@@ -694,8 +696,8 @@ Scorecard** + **Dependabot** for supply-chain hygiene.
 - **Walrus** — durable, content-addressed storage for the bytes that matter (code, diffs, reports,
   artifacts, Playground apps) — far cheaper than on-chain.
 - **Sui** — object-centric ownership, capability-based permissions and events: exactly the
-  primitives a release-trust layer needs, with no custom DID/UCAN stack. **zkLogin** and
-  **sponsored transactions** make it usable by people with no wallet and no gas. **Seal** gates
+  primitives a release-trust layer needs, with no custom DID/UCAN stack. **zkLogin** (Google
+  sign-in) and **optional sponsored transactions** lower the onboarding bar. **Seal** gates
   decryption of private memory by the same caps.
 
 ---
@@ -712,7 +714,7 @@ verifiable** — provenance and metrics are on-chain artifacts, not a server's w
 - **Agent & builder trust** — on-chain scores + vouching + `BuilderBoard`, not off-chain gossip.
 - **Private memory** — Seal-encrypted and gated by the same on-chain caps.
 - **App gallery** — on-chain visits / stars / tips / remix lineage + moderation; unfakeable.
-- **Onboarding** — zkLogin + sponsored tx + LLM proxy: usable with no wallet, no gas, no key.
+- **Onboarding** — connect a wallet (user-paid gas, ~$0.001/action) by default; optional zkLogin + gas sponsor + LLM proxy remove wallet/SUI/API-key friction.
 
 ### How it compares
 
