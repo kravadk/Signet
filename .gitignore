@@ -48,7 +48,7 @@ research/
 # Internal planning notes kept out of the public repo. Public docs stay tracked
 # under README.md, .github/, examples/ and service README files.
 docs/
-DEPLOY.md
+/DEPLOY.md
 PROJECT_PLAN.md
 GITLAWB_MAPPING.md
 HACKATHON_RESEARCH.md

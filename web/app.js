@@ -747,7 +747,7 @@ async function renderSponsorDashboard() {
   if (!el) return;
   const url = sponsorDashboardUrl();
   if (!url) {
-    el.innerHTML = '<div class="empty-state">Sponsor not configured.</div>';
+    el.innerHTML = '<div class="empty-state">Gas-free sponsorship isn\'t enabled on this deployment — actions are signed with your own wallet.</div>';
     return;
   }
   el.innerHTML = '<div class="empty-state loading-pulse">Loading sponsor status...</div>';
@@ -770,7 +770,7 @@ async function renderSponsorDashboard() {
         '</div>' +
       '</div>';
   } catch (e) {
-    el.innerHTML = '<div class="empty-state err">Sponsor dashboard unavailable: ' + escapeHtml(e.message || e) + '</div>';
+    el.innerHTML = '<div class="empty-state">Gas-free sponsorship is offline right now — actions still work, signed with your own wallet.</div>';
   }
 }
 
