@@ -1446,7 +1446,22 @@ body:not(.reduce-motion) .onboard { animation: cardIn .4s var(--ease) both; }
 .pg-frame-bar { display: flex; align-items: center; gap: 6px; padding: 9px 12px; background: var(--bg-elev); border-bottom: 1px solid var(--bd); }
 .pg-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bd-strong); }
 .pg-frame-title { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--tx-3); flex: 1; }
+.pg-frame-wrap { position: relative; flex: 1; display: flex; }
 .pg-preview-frame { flex: 1; width: 100%; border: 0; background: var(--bg-app); }
+/* preview empty-state overlay (before an app is built) */
+.pg-preview-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 0 22px; color: var(--tx-3); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; pointer-events: none; }
+.pg-preview-empty b { color: var(--tx-2); font-weight: 600; }
+.pg-preview-empty b:first-child { display: block; color: var(--tx-3); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+/* chat empty-state guide (before the first build) */
+.pg-empty { padding: 22px 20px; }
+.pg-empty-k { font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; color: var(--blue); margin-bottom: 12px; }
+.pg-empty-lead { color: var(--tx); font-size: 14px; line-height: 1.55; margin-bottom: 16px; }
+.pg-empty-steps { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.pg-empty-steps li { display: flex; align-items: flex-start; gap: 11px; font-size: 13px; color: var(--tx-2); line-height: 1.5; }
+.pg-empty-steps li > span { flex: none; width: 19px; height: 19px; display: inline-grid; place-items: center; border-radius: var(--r-sm); background: var(--blue); color: #0a0c05; font-family: var(--mono); font-weight: 700; font-size: 11px; margin-top: 1px; }
+.pg-empty-steps b { color: var(--tx); }
+.pg-empty-steps kbd { font-family: var(--mono); font-size: 11px; color: var(--tx-3); border: 1px solid var(--bd); border-radius: 3px; padding: 1px 5px; }
+.pg-empty-note { color: var(--tx-3); font-size: 12px; line-height: 1.55; border-top: 1px dashed var(--bd); padding-top: 13px; margin: 0; }
 /* dark, mono publish-bar selects (native white default clashes with the terminal UI) */
 .pg-frame-bar select.pg-mini { background: var(--bg-input); color: var(--tx); border: 1px solid var(--bd-strong); border-radius: var(--r-sm); font-family: var(--mono); cursor: pointer; }
 .pg-frame-bar select.pg-mini option { background: var(--bg-elev); color: var(--tx); }

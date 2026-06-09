@@ -350,7 +350,18 @@ export function renderPlaygroundView() {
           <span class="pg-keystate" id="pgKeyState"></span>
           <button class="btn-ghost pg-mini" id="pgSettings">LLM settings</button>
         </div>
-        <div class="pg-messages" id="pgMessages"></div>
+        <div class="pg-messages" id="pgMessages">
+          <div class="pg-empty">
+            <div class="pg-empty-k">// playground</div>
+            <p class="pg-empty-lead">Describe an app in plain English — an AI builds it live, right here.</p>
+            <ol class="pg-empty-steps">
+              <li><span>1</span><div><b>Describe</b> — type below, or pick an example <span class="pg-dim">↓</span></div></li>
+              <li><span>2</span><div><b>Build</b> — the AI generates a runnable app <kbd>⌘↵</kbd></div></li>
+              <li><span>3</span><div><b>Publish</b> — ship it to Walrus + Sui with verifiable provenance</div></li>
+            </ol>
+            <p class="pg-empty-note">Every published app gets an unfakeable on-chain record — author, content hash, visits, stars and remix lineage.</p>
+          </div>
+        </div>
         <div class="pg-composer">
           <textarea id="pgInput" rows="2" placeholder="A pomodoro timer with an animated countdown ring…"></textarea>
           <button class="btn-primary" id="pgSend">Build ⌘↵</button>
@@ -376,7 +387,10 @@ export function renderPlaygroundView() {
           </label>` : ''}
           <button class="btn-primary pg-mini" id="pgPublish" disabled>Publish</button>
         </div>
-        <iframe id="pgPreview" class="pg-preview-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <div class="pg-frame-wrap">
+          <iframe id="pgPreview" class="pg-preview-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+          <div class="pg-preview-empty" id="pgPreviewEmpty"><b>live preview</b>Your app renders here after <b>Build</b>.</div>
+        </div>
       </div>
     </div>
 
@@ -419,6 +433,7 @@ function refreshKeyState() {
 
 function pushMsg(role, html) {
   const m = $('pgMessages'); if (!m) return;
+  const empty = m.querySelector('.pg-empty'); if (empty) empty.remove(); // first message clears the intro guide
   const div = document.createElement('div');
   div.className = `pg-msg ${role}`;
   div.innerHTML = html;
@@ -434,6 +449,7 @@ function setPreview(spec) {
   const files = (spec.files || []).map((x) => x.path);
   $('pgPreviewTitle').textContent = files.length > 1 ? `${spec.name} · ${files.length} files: ${files.join(', ')}` : spec.name;
   $('pgPublish').disabled = false;
+  const empty = $('pgPreviewEmpty'); if (empty) empty.style.display = 'none'; // app is showing now
 }
 
 if (typeof window !== 'undefined') {
