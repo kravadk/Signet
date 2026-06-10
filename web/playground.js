@@ -1089,7 +1089,12 @@ async function openLiveApp(id) {
   if (STATE.wallet && SETTINGS.sponsorUrl) {
     recordVisit(id).catch((e) => toast('Visit metric did not sync: ' + decodeSuiError(e).message, { kind: 'error' }));
   }
-  window.open(appViewerUrl(app, { local: true }), '_blank', 'noopener');
+  // Open in a new tab. Use a bare `_blank` (no "noopener" feature-string, which some
+  // browsers/popup-blockers treat as a blockable popup) and null the opener for safety;
+  // if the tab is still blocked (strict mobile blockers), navigate in place instead.
+  const url = appViewerUrl(app, { local: true });
+  const w = window.open(url, '_blank');
+  if (w) { try { w.opener = null; } catch {} } else { location.href = url; }
 }
 
 /* Open a private app: decrypt for the builder or an allowlisted workspace member
