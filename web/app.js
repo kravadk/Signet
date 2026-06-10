@@ -1204,8 +1204,8 @@ function renderReposView() {
         (r.latestRelease ? '<span class="pill released" style="margin-left:auto">released</span>' : '') +
       '</div>' +
       '<div class="repo-meta">' +
-        '<div><span class="k">Owner</span><span class="mono">' + escapeHtml(nameOrShort(r.owner)) + (STATE.wallet?.address === r.owner ? ' <span class="you-tag">you</span>' : '') + '</span></div>' +
-        '<div><span class="k">Snapshot</span><span class="mono">' + short(r.currentSnapshot) + '</span></div>' +
+        '<div><span class="k">Owner</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(r.owner) + '">' + escapeHtml(nameOrShort(r.owner)) + '</a>' + (STATE.wallet?.address === r.owner ? ' <span class="you-tag">you</span>' : '') + '</div>' +
+        '<div><span class="k">Snapshot</span><a class="link mono" target="_blank" rel="noreferrer" href="' + blobUrl(r.currentSnapshot) + '">' + short(r.currentSnapshot) + '</a></div>' +
         '<div><span class="k">Files &amp; PRs</span><span class="mono">open →</span></div>' +
       '</div>' +
     '</div>'
@@ -1245,7 +1245,7 @@ function renderReleasesView() {
         '<div class="buy-thumb"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3.5-6.6"/><path d="M9 12l2 2 4-5"/></svg></div>' +
         '<div><div class="repo-name">' + escapeHtml(r.version) + '</div>' +
         '<div class="repo-branch">' + escapeHtml(STATE.repoNameById.get(r.repoId) || short(r.repoId)) +
-        ' · by ' + short(r.publishedBy) + '</div></div>' +
+        ' · by <a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(r.publishedBy) + '">' + short(r.publishedBy) + '</a></div></div>' +
         '<span class="slsa-badge" id="slsa-' + r.id + '" style="margin-left:auto">verifying…</span>' +
       '</div>' +
       '<div class="chain">' +
@@ -1682,7 +1682,7 @@ function renderBountiesView() {
       '<div class="pr-title" title="' + escapeHtml(b.title || '(untitled)') + '">' + escapeHtml(b.title || '(untitled)') + '</div>' +
       '<div class="repo-meta">' +
         '<div><span class="k">Funder</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(b.funder) + '">' + short(b.funder) + '</a></div>' +
-        '<div><span class="k">Claimant</span><span class="mono">' + (b.claimant ? short(b.claimant) : '—') + '</span></div>' +
+        '<div><span class="k">Claimant</span>' + (b.claimant ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(b.claimant) + '">' + short(b.claimant) + '</a>' : '<span class="mono">—</span>') + '</div>' +
         '<div><span class="k">Repo</span><span class="mono">' + escapeHtml(STATE.repoNameById.get(b.repoId) || short(b.repoId)) + '</span></div>' +
         '<div><span class="k">Escrow</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(b.id) + '">' + short(b.id) + '</a></div>' +
         (b.minScore > 0 ? '<div><span class="k">Requires</span><span class="lock-tag" data-tip="Only agents whose trust score ≥ this can claim">score ≥ ' + b.minScore + '</span></div>' : '') +
@@ -1753,7 +1753,7 @@ function renderPaymentsView() {
       '<div class="pr-title" title="' + escapeHtml(p.label || '(payment request)') + '">' + escapeHtml(p.label || '(payment request)') + '</div>' +
       '<div class="repo-meta">' +
         '<div><span class="k">Recipient</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.recipient) + '">' + short(p.recipient) + '</a></div>' +
-        '<div><span class="k">Payer</span><span class="mono">' + (p.payer ? short(p.payer) : '-') + '</span></div>' +
+        '<div><span class="k">Payer</span>' + (p.payer ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.payer) + '">' + short(p.payer) + '</a>' : '<span class="mono">-</span>') + '</div>' +
         '<div><span class="k">Expires</span><span class="mono">' + (p.expiresAt ? new Date(p.expiresAt).toLocaleString() : 'never') + '</span></div>' +
         '<div><span class="k">Request</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(p.id) + '">' + short(p.id) + '</a></div>' +
         '<div><span class="k">Link</span><button class="link mono btn-link" data-copy-pay="' + escapeHtml(link) + '">' + short(link, 18, 10) + '</button></div>' +
@@ -1894,7 +1894,7 @@ function renderActivityView() {
           '<span class="feed-mod mono">' + e.module + '</span></div>' +
         '<div class="feed-meta">' +
           (e.ts ? '<span>' + tfmt.format(new Date(e.ts)) + '</span>' : '') +
-          (e.sender ? '<span class="mono">by ' + short(e.sender) + '</span>' : '') +
+          (e.sender ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(e.sender) + '">by ' + short(e.sender) + '</a>' : '') +
           (e.tx ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerTx(e.tx) + '">' + short(e.tx) + '</a>' : '') +
         '</div>' +
       '</div>' +
@@ -2225,7 +2225,7 @@ function prCardHtml(p) {
     '<div class="pr-card-top"><span class="status ' + st + '">' + statusIcon(p.status) + st.charAt(0).toUpperCase() + st.slice(1) + '</span>' +
       '<span class="link mono" style="margin-left:auto">' + short(p.id) + '</span></div>' +
     '<div class="pr-title" title="' + escapeHtml(p.title || '(untitled)') + '">' + escapeHtml(p.title || '(untitled)') + '</div>' +
-    '<div class="repo-meta"><div><span class="k">Author</span><span class="mono">' + escapeHtml(nameOrShort(p.author)) + (STATE.wallet?.address === p.author ? ' <span class="you-tag">you</span>' : '') + '</span></div>' +
+    '<div class="repo-meta"><div><span class="k">Author</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.author) + '">' + escapeHtml(nameOrShort(p.author)) + '</a>' + (STATE.wallet?.address === p.author ? ' <span class="you-tag">you</span>' : '') + '</div>' +
       '<div><span class="k">Reviews</span><span class="mono">' + (p.reviewRefs?.length || 0) + '</span></div></div>' +
   '</div>';
 }
