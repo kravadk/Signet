@@ -416,7 +416,13 @@
 
      <!-- ===== REPOSITORIES ===== -->
      <div class="view" id="view-repos" style="display:none">
-       <div class="view-head"><h1>Repositories</h1><p>Every repository is a shared Sui object. Its ref points at the current source snapshot stored on Walrus.</p></div>
+       <div class="view-head">
+         <div style="display:flex;align-items:center;gap:14px">
+           <h1 style="margin:0">Repositories</h1>
+           <button class="btn-primary" id="reposImportBtn" style="margin-left:auto;flex:none;width:auto;white-space:nowrap">⭳ Import from GitHub</button>
+         </div>
+         <p>Every repository is a shared Sui object. Its ref points at the current source snapshot stored on Walrus.</p>
+       </div>
        <div class="card-grid" id="reposGrid"><div class="empty-state">Loading…</div></div>
      </div>
 

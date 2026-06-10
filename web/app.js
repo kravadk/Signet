@@ -2417,6 +2417,7 @@ function wireTopbar() {
   $('refreshBtn')?.addEventListener('click', () => { refresh(); toast('Refreshing…', { kind: 'info', timeout: 1200 }); });
   $('helpBtn')?.addEventListener('click', openHelp);
   $('settingsBtn')?.addEventListener('click', openSettings);
+  $('reposImportBtn')?.addEventListener('click', () => actImportFromGitHub());
   if (SETTINGS.reduceMotion) document.body.classList.add('reduce-motion');
   applyAutoPoll();
 }
