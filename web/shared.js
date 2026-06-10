@@ -17,7 +17,7 @@ const DEPLOYMENTS = {
     packageId: '0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1',
     // Latest upgrade (v12) — forge-module WRITES target this so new functions
     // (open_dispute, post_bounty_v2, resolve_dispute_v2, reliability, update_app_v2, payment::*) resolve.
-    writePackageId: '0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5',
+    writePackageId: '0xb84477adbc9e7f58ad676d0c1eac3dcbc2caa4db331757e8da9c51d8641b5f46',
     mvrName: '@signet/forge',
     mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02',
@@ -27,7 +27,7 @@ const DEPLOYMENTS = {
     // Upgraded package (playground + builder-reputation + moderation + remix-reputation
     // + versioning/update_app + handles/NameRegistry + Treasury/tip_app_v2 + app-bounties
     // + paid-fork set_fork_price/pay_to_fork + private apps set_private/seal_approve_app_owner) — Playground WRITES/calls.
-    playgroundPackageId: '0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5',
+    playgroundPackageId: '0xb84477adbc9e7f58ad676d0c1eac3dcbc2caa4db331757e8da9c51d8641b5f46',
     // An event's type carries the package id of the UPGRADE that DEFINED its struct —
     // not the original module id. So AppPublished lives under the original pkg, but
     // BuilderScored/AppFlagged/NameClaimed/AppBounty*/AppForkPaid/AppPrivacySet live under later upgrade pkgs.

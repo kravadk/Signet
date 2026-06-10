@@ -55,11 +55,11 @@ Upgrades are additive; `*_v2`/`*_v3` are newer variants kept alongside originals
 - **Handles:** `claim_name`
 - **Accessors:** `builder` · `builder_apps` · `builder_remixes` · `builder_score` · `stars` · `visits` · `tips_total` · `flag_count` · `is_hidden` · `is_private` · `fork_price` · `parent` · `tree_hash` · `release_name` · `name_owner` · `name_of_owner` · `bounty_open|poster|reward|winner` · `treasury_admin` · `treasury_balance`
 
-### `governance` — autonomous Treasury spending (v13, in repo)
+### `governance` — autonomous Treasury spending (v13 — live on testnet)
 - `open_proposal(treasury, recipient, amount, label, voting_ms, timelock_ms, clock)` · `vote(proposal, board, approve, clock)` (weight = `builder_score`, one/address) · `execute(proposal, treasury, clock)` (permissionless crank after voting + timelock; disburses via package-only `playground::pay_from_treasury`)
 - **Accessors:** `proposal_status` · `proposal_votes_for` · `proposal_votes_against` · `proposal_amount` · `proposal_recipient`
 
-### `subscription` — recurring & streaming payments (v13, in repo)
+### `subscription` — recurring & streaming payments (v13 — live on testnet)
 - **Recurring:** `create_subscription(payee, label, amount_per_period, period_ms, total_periods, funding, clock)` · `claim_due(sub, clock)` (payee; matured periods) · `cancel(sub)` (refund unclaimed to payer)
 - **Streaming:** `create_stream(payee, label, funding, duration_ms, clock)` · `claim_stream(stream, clock)` (pro-rata vested) · `cancel_stream(stream, clock)`
 

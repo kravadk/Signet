@@ -11,7 +11,7 @@
 
 Built for **Sui Overflow 2026** · primary track: **Walrus** · secondary: **Agentic Web**.
 
-**Live:** [signet-sui.vercel.app](https://signet-sui.vercel.app) · **Verify a release yourself** (zero setup): [signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify) · **Contracts:** [testnet](https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5) · [mainnet](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54)
+**Live:** [signet-sui.vercel.app](https://signet-sui.vercel.app) · **Verify a release yourself** (zero setup): [signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify) · **Contracts:** [testnet](https://suiscan.xyz/testnet/object/0xb84477adbc9e7f58ad676d0c1eac3dcbc2caa4db331757e8da9c51d8641b5f46) · [mainnet](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54)
 
 **Use Signet when you need to *prove* what an AI agent did** — to a user, a buyer, a DAO, or a judge. Every action (propose · review · build · release) is recorded on Walrus + Sui and re-checkable by anyone, with no trust in us — not a screenshot.
 
@@ -40,7 +40,7 @@ events — re-checkable by anyone, not a screenshot.
 
 | | |
 |---|---|
-| **Live** | testnet **and** mainnet, both verified on-chain — [testnet pkg ↗](https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5) · [mainnet pkg ↗](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54) |
+| **Live** | testnet **and** mainnet, both verified on-chain — [testnet pkg ↗](https://suiscan.xyz/testnet/object/0xb84477adbc9e7f58ad676d0c1eac3dcbc2caa4db331757e8da9c51d8641b5f46) · [mainnet pkg ↗](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54) |
 | **On Walrus** | source snapshots, PR diffs, signed reviews, CI reports, release artifacts + manifests, app archives — content-addressed, tree-hash + Merkle |
 | **On Sui** | repos, PRs, reviews, releases, reputation, bounties, payments, apps — objects + events; every write gated by a capability |
 | **Agents** | MCP server, 22 tools; each bound to a scoped, expiring `AgentCap` — an agent can propose and review but **never** merge or release |
@@ -193,7 +193,7 @@ Reputation and permissions are **contract checks, not server policy**:
 |---|---|
 | Forge package | `0x07b63031a435ba7e38909e858c97e9bb6cad14ca5cb51dc9d1fdb9720f237de1` |
 | ForgeRegistry (shared) | `0x526227556a1e1da65fe2612423e4b8223b8ad38c3d516d9bc62f975d00796a02` |
-| **Latest upgrade — all writes target this (v12)** | `0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5` |
+| **Latest upgrade — all writes target this (v13)** | `0xb84477adbc9e7f58ad676d0c1eac3dcbc2caa4db331757e8da9c51d8641b5f46` |
 | StarRegistry · BuilderBoard · FlagRegistry | `0xa20bdff4…1167e2` · `0xec1eeaf5…c62fa2f` · `0x48068f76…5268a046` |
 | NameRegistry · Treasury | `0xf802954a…d8b62f10` · `0x9062ed0b…d89ad921` |
 | ForkRegistry · PrivacyRegistry | `0xc774e8ca…d753909` · `0x1c331210…f8ecd20f` |
@@ -801,8 +801,8 @@ SDK/CLI surfaces (`forge gov-propose|gov-vote|gov-execute`, `forge sub-create|su
 
 ## Project status
 
-- ✅ **Contracts** live on **testnet + mainnet** at v12 (forge · pull_request · release · issue · bounty · reputation · payment · playground); incl. paid-fork + Seal private apps + payment links.
-- 🆕 **`governance`** (reputation-weighted Treasury voting + timelock) and **`subscription`** (recurring + streaming SUI payments) modules are implemented and tested in the repo (`sui move test` **80/80**); they ship in the next **additive** package upgrade (v13) — see [Deploy the v13 upgrade](#deploy-the-v13-upgrade).
+- ✅ **Contracts** live on **testnet at v13** (10 modules incl. `governance` + `subscription`) and on **mainnet at v12** (8 modules); incl. paid-fork + Seal private apps + payment links.
+- ✅ **`governance`** (reputation-weighted Treasury voting + timelock) and **`subscription`** (recurring + streaming SUI payments) are **live on testnet** (v13, `sui move test` **80/80**, package `0xb84477…`); the mainnet v13 upgrade is the same gated step — see [Deploy the v13 upgrade](#deploy-the-v13-upgrade).
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (22 tools) + CLI (14 commands) + typed SDK clients.

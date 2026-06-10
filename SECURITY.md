@@ -190,7 +190,7 @@ opt-in `governance` module *does* add reputation-weighted voting + a timelock, b
 
 ## Test & verification coverage
 
-- **Move unit tests:** 80/80 passing (`sui move test --path move/signet`) — incl. `governance` and `subscription` (ship in the v13 upgrade).
+- **Move unit tests:** 80/80 passing (`sui move test --path move/signet`) — incl. `governance` and `subscription` (live on testnet in v13).
 - **TS unit tests:** 17/17 (`npm --prefix app test`) incl. snapshot tree-hash + Merkle proofs.
 - **On-chain e2e (real testnet key):** 18/18 (`app/scripts/e2e-onchain.mjs`) — full chain
   init → grant-agent → PR → review → merge → release → verify → bounty → dispute → reliability →
