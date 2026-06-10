@@ -126,6 +126,7 @@ export const CFG = {
   network: NETWORK,
   ...DEPLOYMENTS[NETWORK],
   llmProxyUrl: QO.llmProxyUrl || WF.llmProxyUrl || '',
+  importProxyUrl: WF.importProxyUrl || (DEPLOYMENTS[NETWORK] && DEPLOYMENTS[NETWORK].importProxyUrl) || '',
 };
 /** Is the active network deployed (package id present)? */
 export const CFG_READY = !!CFG.packageId;
