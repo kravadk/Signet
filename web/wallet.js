@@ -595,14 +595,14 @@ export async function actImportFromGitHub() {
   }
   formModal('Import from GitHub', [
     { id: 'url', label: 'GitHub URL (https://github.com/owner/repo)', type: 'text' },
-    { id: 'branch', label: 'Branch', type: 'text', value: 'main' },
+    { id: 'branch', label: 'Branch (blank = the repo default)', type: 'text', value: '' },
     { id: 'name', label: 'Repo name (optional — defaults to the GitHub name)', type: 'text' },
   ], async (v, setBusy) => {
     setBusy(true);
     try {
       const res = await withTimeout(fetch(CFG.importProxyUrl.replace(/\/$/, '') + '/import', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: v.url, branch: v.branch || 'main' }),
+        body: JSON.stringify({ url: v.url, branch: v.branch || '' }),
       }), 90000, 'import');
       const out = await res.json();
       if (!res.ok) throw new Error(out.error || 'import failed');

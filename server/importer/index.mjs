@@ -44,18 +44,32 @@ function normalizeGitHubUrl(raw) {
 }
 
 function safeBranch(b) {
-  const s = String(b || 'main');
-  if (!/^[\w./-]+$/.test(s)) throw new Error('bad branch name');
-  return s;
+  const s = String(b || '').trim();
+  if (s && !/^[\w./-]+$/.test(s)) throw new Error('bad branch name');
+  return s; // '' when unspecified → clone the repo's default branch
 }
 
 async function importRepo(rawUrl, rawBranch) {
   const { url, name } = normalizeGitHubUrl(rawUrl);
-  const branch = safeBranch(rawBranch);
+  const want = safeBranch(rawBranch);
   const tmp = mkdtempSync(join(tmpdir(), 'signet-import-'));
   try {
-    execFileSync('git', ['clone', '--depth', '1', '--branch', branch, '--', url, tmp],
+    const clone = (b) => execFileSync('git',
+      b ? ['clone', '--depth', '1', '--branch', b, '--', url, tmp]
+        : ['clone', '--depth', '1', '--', url, tmp],
       { stdio: 'ignore', timeout: CLONE_TIMEOUT_MS });
+    // Try the requested branch; on failure (e.g. the repo uses master, not main, or no
+    // branch was given) fall back to the remote's default branch.
+    try { clone(want || null); }
+    catch (e) {
+      if (!want) throw e;
+      rmSync(tmp, { recursive: true, force: true });
+      clone(null);
+    }
+    // Record the branch we actually cloned so the on-chain snapshot is accurate.
+    let branch = want;
+    try { branch = execFileSync('git', ['-C', tmp, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', timeout: 10000 }).trim() || want; } catch {}
+    if (!branch) branch = 'main';
     rmSync(join(tmp, '.git'), { recursive: true, force: true });
     const { archive, manifest } = buildSnapshot({
       repoDir: tmp, name, branch, previousSnapshot: null, nowEpochMs: Date.now(),
