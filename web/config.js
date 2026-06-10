@@ -28,6 +28,7 @@ window.__WF_CONFIG = {
   sponsorUrl: '',
   portalUrl: 'https://signet-portal.onrender.com',
   llmProxyUrl: 'https://signet-llm-proxy.onrender.com/llm',
+  importProxyUrl: 'https://signet-importerr.onrender.com',
   zkSaltUrl: 'https://signet-salt.onrender.com/salt',
   zkProverUrl: '',
   zkGoogleClientId: '893414924200-4j28fh1986ru14enu1nm1h48r2ldq1k5.apps.googleusercontent.com',
