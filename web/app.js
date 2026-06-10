@@ -1753,7 +1753,7 @@ function renderPaymentsView() {
       '<div class="pr-title" title="' + escapeHtml(p.label || '(payment request)') + '">' + escapeHtml(p.label || '(payment request)') + '</div>' +
       '<div class="repo-meta">' +
         '<div><span class="k">Recipient</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.recipient) + '">' + short(p.recipient) + '</a></div>' +
-        '<div><span class="k">Payer</span>' + (p.payer ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.payer) + '">' + short(p.payer) + '</a>' : '<span class="mono">-</span>') + '</div>' +
+        '<div><span class="k">Payer</span>' + (p.payer ? '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.payer) + '">' + short(p.payer) + '</a>' : '<span class="mono">—</span>') + '</div>' +
         '<div><span class="k">Expires</span><span class="mono">' + (p.expiresAt ? new Date(p.expiresAt).toLocaleString() : 'never') + '</span></div>' +
         '<div><span class="k">Request</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(p.id) + '">' + short(p.id) + '</a></div>' +
         '<div><span class="k">Link</span><button class="link mono btn-link" data-copy-pay="' + escapeHtml(link) + '">' + short(link, 18, 10) + '</button></div>' +
@@ -1884,7 +1884,7 @@ function renderActivityView() {
   const el = $('activityFeed');
   if (!el) return;
   const feed = STATE.activity.feed || [];
-  if (!feed.length) { el.innerHTML = '<div class="empty-state">No on-chain activity yet.</div>'; return; }
+  if (!feed.length) { el.innerHTML = '<div class="empty-state">No on-chain activity yet — signed actions appear here as they happen.</div>'; return; }
   const tfmt = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   el.innerHTML = feed.map((e) =>
     '<div class="feed-item">' +

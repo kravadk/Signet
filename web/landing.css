@@ -329,3 +329,12 @@ section { padding: 72px 0; position: relative; }
 .walrus-list li::before { content: "▸"; position: absolute; left: 0; color: var(--ink); }
 .walrus-foot { max-width: 880px; margin: 22px auto 0; color: var(--tx-3); font-size: 12.5px; line-height: 1.6; border-top: 1px dashed var(--bd); padding-top: 16px; }
 @media (max-width: 720px) { .walrus-list { grid-template-columns: 1fr; } }
+
+/* Phone (<=560px): shrink the hero headline + let the chain/verifier controls fit. */
+@media (max-width: 560px) {
+  .hero { padding: 52px 0 44px; }
+  .hero h1 { font-size: clamp(30px, 9vw, 52px); }
+  .chain-node { min-width: 0; padding: 8px 10px; }
+  .verifier-ctl { flex-wrap: wrap; }
+  .verifier-ctl select { min-width: 0; flex: 1 1 140px; }
+}
