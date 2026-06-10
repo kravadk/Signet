@@ -941,14 +941,17 @@ function renderWorkspaceActions(grid, apps) {
 }
 
 /* viewer URL for a published app (Phase 3 viewer-route) */
-export function appViewerUrl(app) {
+export function appViewerUrl(app, opts = {}) {
   // Prefer the public portal when configured — it serves clean URLs + Open Graph
-  // share cards (link previews). Falls back to the static viewer page otherwise.
-  if (SETTINGS.portalUrl) {
+  // share cards (link previews). `opts.local` forces the self-contained, same-origin
+  // viewer so that *opening* an app never depends on the optional portal being up
+  // (Share still uses the portal for rich link previews).
+  if (!opts.local && SETTINGS.portalUrl) {
     return `${SETTINGS.portalUrl.replace(/\/$/, '')}/app/${app.id}${CFG.network === 'mainnet' ? '?net=mainnet' : ''}`;
   }
   const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-  return `${base}viewer.html?app=${app.id}&net=${CFG.network}`;
+  // clean URL (no `.html`) so a query string is never dropped by a cleanUrls 301 redirect
+  return `${base}viewer?app=${app.id}&net=${CFG.network}`;
 }
 
 function appById(id) { return pg.gallery.find((a) => a.id === id); }
@@ -1086,7 +1089,7 @@ async function openLiveApp(id) {
   if (STATE.wallet && SETTINGS.sponsorUrl) {
     recordVisit(id).catch((e) => toast('Visit metric did not sync: ' + decodeSuiError(e).message, { kind: 'error' }));
   }
-  window.open(appViewerUrl(app), '_blank', 'noopener');
+  window.open(appViewerUrl(app, { local: true }), '_blank', 'noopener');
 }
 
 /* Open a private app: decrypt for the builder or an allowlisted workspace member
