@@ -577,6 +577,95 @@ export async function actGrantAgent(repoId, ownerCapId) {
   });
 }
 
+export async function actRevokeAgent(repoId, ownerCapId, agentCapId) {
+  if (!agentCapId) { toast('AgentCap id is required', { kind: 'error' }); return; }
+  const tx = new Transaction();
+  pkgCall(tx, 'forge::revoke_agent_cap', [tx.object(repoId), tx.object(ownerCapId), tx.pure.id(agentCapId)]);
+  await signAndRun(tx, 'AgentCap revoked');
+}
+
+export async function actOpenPr(repoId, ownerCapId, agentCapId) {
+  formModal('Open a pull request', [
+    { id: 'title', label: 'Title', type: 'text' },
+    { id: 'head', label: 'Head snapshot manifest blob (Walrus blob id)', type: 'text' },
+    { id: 'diff', label: 'Diff manifest blob (optional — defaults to head snapshot)', type: 'text' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const reputationId = await findLedger(repoId);
+      if (!reputationId) throw new Error('Reputation ledger not found');
+      const headSnapshot = (v.head || '').trim();
+      if (!headSnapshot) throw new Error('Head snapshot blob is required');
+      const diffManifest = (v.diff || v.head || '').trim();
+      const tx = new Transaction();
+      if (ownerCapId) {
+        pkgCall(tx, 'pull_request::open_pr_as_owner', [
+          tx.object(repoId), tx.object(reputationId), tx.object(ownerCapId),
+          tx.pure.string(headSnapshot), tx.pure.string(diffManifest), tx.pure.string(v.title || 'Update snapshot'),
+        ]);
+      } else if (agentCapId) {
+        pkgCall(tx, 'pull_request::open_pr_as_agent', [
+          tx.object(repoId), tx.object(reputationId), tx.object(agentCapId),
+          tx.pure.string(headSnapshot), tx.pure.string(diffManifest), tx.pure.string(v.title || 'Update snapshot'),
+        ]);
+      } else {
+        throw new Error('OwnerCap or AgentCap with open_pr scope is required');
+      }
+      const r = await signAndRun(tx, 'Pull request opened'); if (r) closeModal();
+    } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
+export async function actPublishRelease(repoId, ownerCapId, currentSnapshot = '') {
+  formModal('Publish a release', [
+    { id: 'version', label: 'Version tag (e.g. v0.1.0)', type: 'text' },
+    { id: 'artifact', label: 'Build artifact blob id', type: 'text' },
+    { id: 'report', label: 'Test report blob id', type: 'text' },
+    { id: 'mergedPr', label: 'Merged PR object id (optional — enables v2 hard link)', type: 'text' },
+    { id: 'source', label: 'Source snapshot blob id (used when merged PR is blank)', type: 'text', value: currentSnapshot || '' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const version = (v.version || '').trim();
+      const buildArtifact = (v.artifact || '').trim();
+      const testReport = (v.report || '').trim();
+      const mergedPrId = (v.mergedPr || '').trim();
+      const sourceSnapshot = (v.source || currentSnapshot || '').trim();
+      if (!version) throw new Error('Version is required');
+      if (!buildArtifact) throw new Error('Build artifact blob is required');
+      if (!testReport) throw new Error('Test report blob is required');
+      if (!mergedPrId && !sourceSnapshot) throw new Error('Source snapshot blob is required when no merged PR is linked');
+      const tx = new Transaction();
+      if (mergedPrId) {
+        pkgCall(tx, 'release::publish_release_v2', [
+          tx.object(repoId), tx.object(ownerCapId), tx.object(mergedPrId),
+          tx.pure.string(version), tx.pure.string(buildArtifact), tx.pure.string(testReport),
+        ]);
+      } else {
+        pkgCall(tx, 'release::publish_release', [
+          tx.object(repoId), tx.object(ownerCapId),
+          tx.pure.string(version), tx.pure.string(sourceSnapshot),
+          tx.pure.string(buildArtifact), tx.pure.string(testReport),
+        ]);
+      }
+      const r = await signAndRun(tx, 'Release published'); if (r) closeModal();
+    } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
+export async function actTransferOwnership(ownerCapId) {
+  formModal('Transfer repository ownership', [
+    { id: 'to', label: 'Recipient address (0x…)', type: 'text' },
+  ], async (v, setBusy) => {
+    setBusy(true);
+    try {
+      const tx = new Transaction();
+      tx.transferObjects([tx.object(ownerCapId)], tx.pure.address(v.to));
+      const r = await signAndRun(tx, 'RepoOwnerCap transferred'); if (r) closeModal();
+    } catch (e) { toast('Failed: ' + e.message, { kind: 'error' }); } finally { setBusy(false); }
+  });
+}
+
 /** Import a GitHub repo: keyless importer service snapshots it to Walrus, then the
  *  user signs create_repo with the returned manifest. Falls back to the CLI command
  *  when no importer service is configured. */

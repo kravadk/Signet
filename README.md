@@ -37,6 +37,7 @@ events — re-checkable by anyone, not a screenshot.
 1. **Watch a release verify itself, zero setup** → **[signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify)**. It opens green: re-fetches the Walrus blobs, recomputes the SHA-256 tree-hash + a per-file Merkle proof, follows the chain, and reports **SLSA-style L3**. Share a specific one with `…/app#verify?release=<id>`.
 2. **Describe → AI builds → publish** → **[/app#playground](https://signet-sui.vercel.app/app#playground)**. An LLM builds an app live in the browser; Publish stores the bytes on Walrus and anchors a `PublishedApp` on Sui.
 3. **Real on-chain data, no database** → **[/app#repos](https://signet-sui.vercel.app/app#repos)**. 33 repositories read live from chain, including real GitHub imports (a 266 MB repo reduced to 12.5k source files). Every number in the app comes from Sui + Walrus.
+4. **Repo page now shows the whole trust story** → each repo has in-browser owner/agent actions, a `Verify whole snapshot` proof, scoped-agent visibility, repo-local `Issues` + `Bounties`, and a guidance strip that suggests the next safe action (`Set approvals`, `Grant agent`, `Verify snapshot`, `Publish release`).
 
 | | |
 |---|---|
@@ -150,6 +151,17 @@ on-chain object, not a screenshot.
   cancelled / expired states, and `payment.paid` webhooks.
 - **CI agent** that fetches a snapshot, runs `sui move test`, and posts a signed review on-chain.
 
+The repo detail page is also the operator surface for judges and owners:
+
+- **Browser actions first** — grant / revoke a scoped `AgentCap`, set approvals, open a PR,
+  publish a release, or rotate ownership from the repo page; CLI remains as fallback.
+- **Whole-snapshot proof** — one click re-fetches the anchored manifest from Walrus, recomputes the
+  snapshot `treeHash` (and Merkle root when present), and shows a pass/fail proof in-browser.
+- **Per-repo coordination** — repo-local `Issues`, `Bounties`, and an `Agents & reputation` panel
+  show who can act on this repo and with which scopes / expiry.
+- **Guided ops** — a `Next steps` strip surfaces context-aware suggestions similar to Render/Vercel:
+  no approvals, no agents, unverified snapshot, no release yet.
+
 ---
 
 ## Trust model
@@ -160,6 +172,8 @@ Reputation and permissions are **contract checks, not server policy**:
 - **AgentCap** — delegated, *scoped* (`open_pr` / `review` / `run_ci`), epoch-expiring, and
   **owner-revocable** (instant kill-switch). Agents propose, review and run CI; they can **never**
   merge or release.
+- **Repo-level visibility** — the UI shows scoped caps, expiry and revocation state per repo, so
+  delegation is inspectable where the work actually happens.
 - **Agent reputation** — `merged·10 + reviews·3 + CI·2 + vouches·5`, recomputed on every signed
   action and stored on the `AgentProfile`.
 - **Vouching** — an agent with score ≥ 10 can vouch for another (once per pair, no self-vouch).

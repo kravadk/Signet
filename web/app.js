@@ -22,7 +22,8 @@ import { Transaction } from 'https://esm.sh/@mysten/sui@1.30.0/transactions';
 import { toast, copyText, copyBtn, openModal, closeModal, relativeTime, skeletonCards, skeletonRows, skeletonList } from './ui.js';
 import {
   wireWallet, renderConnect, loadMyCaps, ownerCapFor, agentCapFor, signAndRun, signAndRunCreated, recoverPendingTx,
-  resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actMergePr, actClosePr,
+  resolveName, nameOrShort, actOpenIssue, actPostBounty, actGrantAgent, actRevokeAgent,
+  actOpenPr, actPublishRelease, actTransferOwnership, actMergePr, actClosePr,
   actVouch, actSetApprovals, actOpenDispute, actResolveDispute, actImportFromGitHub,
 } from './wallet.js';
 import { wirePlayground, renderPlaygroundView, loadGallery } from './playground.js';
@@ -149,22 +150,28 @@ async function listAllReputation() {
   return [...seen.values()].sort((a, b) => b.score - a.score);
 }
 
-/** Map recipient address -> their AgentCap grant (scope/expiry/revoked). */
+/** Map cap id -> AgentCap grant metadata (repo/recipient/scope/expiry/revoked). */
 async function listAgentCaps() {
   const [grants, revokes] = await Promise.all([
     queryAllEvents({ MoveEventType: `${CFG.packageId}::forge::AgentCapGranted` }),
     queryAllEvents({ MoveEventType: `${CFG.packageId}::forge::AgentCapRevoked` }),
   ]);
   const revoked = new Set(revokes.map((e) => e.parsedJson?.cap_id).filter(Boolean));
-  const byAgent = new Map(); // recipient -> {capId, scopes, expires, repoId, revoked}
+  const byCap = new Map();
   for (const e of grants) {
-    const p = e.parsedJson; if (!p?.recipient || byAgent.has(p.recipient)) continue;
-    byAgent.set(p.recipient, {
-      capId: p.cap_id, scopes: Number(p.scopes), expires: Number(p.expires_at_epoch),
-      repoId: p.repo_id, revoked: revoked.has(p.cap_id),
+    const p = e.parsedJson;
+    if (!p?.recipient || !p?.cap_id) continue;
+    byCap.set(p.cap_id, {
+      capId: p.cap_id,
+      agent: p.recipient,
+      scopes: Number(p.scopes),
+      expires: Number(p.expires_at_epoch),
+      repoId: p.repo_id,
+      revoked: revoked.has(p.cap_id),
+      ts: Number(e.timestampMs || 0),
     });
   }
-  return byAgent;
+  return byCap;
 }
 
 function parseIssue(x, id) {
@@ -793,12 +800,16 @@ function setNavCount(id, n) {
 
 /** A command panel. If `walletAction` is given AND a wallet is connected, also
  *  shows a primary button that signs the action in-browser. CLI is the fallback. */
+function actionButton(label, fn, cls = 'cmd-action') {
+  const id = 'wa-' + Math.random().toString(36).slice(2, 8);
+  walletActions[id] = fn;
+  return `<button class="${escapeHtml(cls)}" data-wa="${id}">${escapeHtml(label)}</button>`;
+}
+
 function cmdPanel(title, cmd, note, walletAction) {
   let actionHtml = '';
   if (walletAction && STATE.wallet) {
-    const id = 'wa-' + Math.random().toString(36).slice(2, 8);
-    walletActions[id] = walletAction.fn;
-    actionHtml = `<button class="cmd-action" data-wa="${id}">${escapeHtml(walletAction.label)}</button>`;
+    actionHtml = actionButton(walletAction.label, walletAction.fn);
   }
   return '<div class="cmd-panel">' +
     '<div class="cmd-head"><span class="cmd-title">' + escapeHtml(title) + '</span>' +
@@ -1294,9 +1305,44 @@ function renderReleasesView() {
 function capMatchesScope(cap, scope) {
   if (scope === 'all') return true;
   if (!cap) return false;
-  if (scope === 'active') return !cap.revoked;
+  if (scope === 'active') return capStatusInfo(cap).active;
   const bits = { open_pr: SCOPE_OPEN_PR, review: SCOPE_REVIEW, run_ci: SCOPE_RUN_CI };
   return (cap.scopes & bits[scope]) === bits[scope];
+}
+
+function capStatusInfo(cap) {
+  const ep = STATE.epoch;
+  const expired = !cap?.revoked && !!cap?.expires && ep != null && cap.expires <= ep;
+  const active = !!cap && !cap.revoked && !expired;
+  const soon = active && !!cap.expires && ep != null && (cap.expires - ep) <= 5;
+  return {
+    active,
+    expired,
+    soon,
+    cls: cap?.revoked ? 'revoked' : soon ? 'soon' : active ? 'active' : 'revoked',
+    label: cap?.revoked ? 'revoked' : soon ? 'expires soon' : active ? 'active' : 'expired',
+  };
+}
+
+function sortCaps(a, b) {
+  const rank = (cap) => cap.revoked ? 0 : capStatusInfo(cap).active ? 2 : 1;
+  return rank(b) - rank(a) || Number(b.ts || 0) - Number(a.ts || 0);
+}
+
+function capsForAgent(addr) {
+  return [...STATE.agentCaps.values()]
+    .filter((cap) => cap.agent === addr)
+    .sort(sortCaps);
+}
+
+function primaryAgentCap(addr) {
+  return capsForAgent(addr)[0] || null;
+}
+
+function capsForRepo(repoId) {
+  return [...STATE.agentCaps.values()]
+    .filter((cap) => cap.repoId === repoId)
+    .sort(sortCaps);
 }
 
 /** Read the on-chain ReliabilityLedger (Table<address, AgentReliability>) into a
@@ -1353,7 +1399,7 @@ function filteredAgents() {
   const minScore = Number(agentFilters.minScore || 0);
   const minRel = agentFilters.reliability === 'all' ? 0 : Number(agentFilters.reliability);
   return STATE.reps
-    .map((r) => ({ rep: r, cap: STATE.agentCaps.get(r.agent), summary: agentSummary(r.agent) }))
+    .map((r) => ({ rep: r, cap: primaryAgentCap(r.agent), summary: agentSummary(r.agent) }))
     .filter(({ rep, cap, summary }) => {
       if (q && !rep.agent.toLowerCase().includes(q) && !String(nameOrShort(rep.agent)).toLowerCase().includes(q)) return false;
       if (rep.score < minScore) return false;
@@ -1521,7 +1567,7 @@ function showAgentDetail(addr) {
   backTo = 'agents';
   const r = STATE.reps.find((x) => x.agent === addr);
   if (!r) return;
-  const cap = STATE.agentCaps.get(addr);
+  const cap = primaryAgentCap(addr);
   const s = agentSummary(addr);
   const host = $('detailBody');
   showView('detail');
@@ -1530,7 +1576,7 @@ function showAgentDetail(addr) {
   const capHtml = cap
     ? '<div><span class="k">AgentCap</span><a class="mono link" target="_blank" rel="noreferrer" href="' + explorerObject(cap.capId) + '">' + short(cap.capId) + '</a></div>' +
       '<div><span class="k">Scopes</span><span>' + (scopeChips(cap.scopes).map((x) => '<span class="scope-chip">' + x + '</span>').join('') || '<span class="scope-chip none">none</span>') + '</span></div>' +
-      '<div><span class="k">Cap status</span><span class="cap-status ' + (cap.revoked ? 'revoked' : 'active') + '">' + (cap.revoked ? 'revoked' : 'active') + '</span></div>'
+      '<div><span class="k">Cap status</span><span class="cap-status ' + capStatusInfo(cap).cls + '">' + capStatusInfo(cap).label + '</span></div>'
     : '<div><span class="k">AgentCap</span><span class="mono">none loaded</span></div>';
   const vouchRows = s.vouches.length
     ? s.vouches.map((v) => '<div class="feed-item"><div class="feed-body"><div class="feed-top"><span class="feed-type">Vouch</span><span class="feed-mod">' + escapeHtml(STATE.repoNameById.get(v.repoId) || short(v.repoId)) + '</span></div><div class="feed-meta"><span>by <a class="link mono" href="' + explorerAddress(v.voucher) + '" target="_blank" rel="noreferrer">' + escapeHtml(nameOrShort(v.voucher)) + '</a></span><a class="link mono" href="' + explorerTx(v.tx) + '" target="_blank" rel="noreferrer">' + short(v.tx) + '</a></div></div></div>').join('')
@@ -2291,6 +2337,90 @@ async function runVerify(releaseId, hostEl, btnEl) {
   }
 }
 
+async function recomputeMerkleRootBrowser(manifest) {
+  if (!manifest?.files?.length) return null;
+  let level = [];
+  for (const f of manifest.files) level.push(await sha256Hex(`${f.path}:${f.sha256}`));
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i];
+      const right = i + 1 < level.length ? level[i + 1] : left;
+      next.push(await sha256Hex(left + right));
+    }
+    level = next;
+  }
+  return level[0] || null;
+}
+
+async function verifyRepoSnapshotBrowser(repoId, expectedSnapshot) {
+  const liveRepo = await getRepo(repoId);
+  const anchor = liveRepo?.currentSnapshot || expectedSnapshot || '';
+  const steps = [
+    { label: 'Repository object on-chain', ok: !!liveRepo, detail: liveRepo ? short(liveRepo.id) : 'repo not found' },
+    { label: 'Anchored snapshot matches this view', ok: !!anchor && anchor === expectedSnapshot, detail: anchor ? short(anchor) : 'missing snapshot anchor' },
+  ];
+  if (!anchor) return { pass: false, anchor, steps, fileCount: 0 };
+  const manifest = await fetchManifest(anchor);
+  const treeOk = await verifyTreeHashBrowser(manifest);
+  const merkleRoot = manifest?.merkleRoot ? await recomputeMerkleRootBrowser(manifest) : null;
+  const merkleOk = manifest?.merkleRoot ? merkleRoot === manifest.merkleRoot : null;
+  steps.push({ label: 'Anchored manifest loads from Walrus', ok: !!manifest, detail: manifest ? `${manifest.files.length} files` : 'blob unavailable' });
+  steps.push({
+    label: 'treeHash recomputes locally',
+    ok: treeOk,
+    detail: manifest?.treeHash ? `${manifest.treeHash.slice(0, 12)}…` : 'manifest has no treeHash',
+  });
+  if (manifest?.merkleRoot) {
+    steps.push({
+      label: 'Merkle root recomputes locally',
+      ok: !!merkleOk,
+      detail: `${String(manifest.merkleRoot).slice(0, 12)}…`,
+    });
+  }
+  return {
+    pass: steps.every((s) => s.ok),
+    anchor,
+    manifest,
+    fileCount: manifest?.files?.length || 0,
+    treeHash: manifest?.treeHash || '',
+    merkleRoot: manifest?.merkleRoot || '',
+    steps,
+  };
+}
+
+function renderRepoSnapshotResult(host, result) {
+  const badge = result.pass
+    ? '<span class="vbadge pass">✓ Snapshot verified</span>'
+    : '<span class="vbadge fail">✗ Snapshot mismatch</span>';
+  const meta = result.fileCount
+    ? '<div class="repo-proof-meta"><span class="market-pill">files ' + result.fileCount + '</span>' +
+      (result.treeHash ? '<span class="market-pill">treeHash ' + escapeHtml(result.treeHash.slice(0, 10)) + '…</span>' : '') +
+      (result.anchor ? '<span class="market-pill">anchor ' + escapeHtml(short(result.anchor)) + '</span>' : '') +
+      '</div>'
+    : '';
+  host.innerHTML = badge + meta + '<div class="verify-steps">' + result.steps.map((s) =>
+    '<div class="vstep ' + (s.ok ? 'ok' : 'bad') + '">' +
+      '<div class="vmark">' + (s.ok ? '✓' : '!') + '</div>' +
+      '<div class="vbody"><div class="vtitle">' + escapeHtml(s.label) + '</div>' +
+      '<div class="vdetail">' + escapeHtml(s.detail || '') + '</div></div>' +
+    '</div>'
+  ).join('') + '</div>';
+}
+
+async function runRepoSnapshotVerify(repoId, hostEl, btnEl, expectedSnapshot) {
+  if (!hostEl) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Verifying…'; }
+  hostEl.innerHTML = '<div class="empty-state loading-pulse">Recomputing treeHash from the anchored manifest…</div>';
+  try {
+    renderRepoSnapshotResult(hostEl, await verifyRepoSnapshotBrowser(repoId, expectedSnapshot));
+  } catch (e) {
+    hostEl.innerHTML = '<div class="empty-state err">Snapshot verify failed: ' + escapeHtml(String(e?.message || e)) + '</div>';
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Verify whole snapshot'; }
+  }
+}
+
 /* ============================================================
    Drill-down detail views (repo / pr / release)
    ============================================================ */
@@ -2301,10 +2431,153 @@ function isTextPath(p) {
   return /\.(move|toml|md|txt|json|js|ts|tsx|sh|lock|yml|yaml|cfg|gitignore|rs|go|py)$/i.test(p) || !/\.[a-z0-9]+$/i.test(p);
 }
 
+function renderRepoGuidance(repo, ctx) {
+  const ownerCapId = ownerCapFor(repo.id);
+  const agentCap = agentCapFor(repo.id);
+  const activeAgents = ctx.repoCaps.filter((cap) => capStatusInfo(cap).active);
+  const items = [];
+  if (ownerCapId && (repo.minApprovals || 0) === 0) {
+    items.push({
+      title: 'No reviews required',
+      body: 'Set a minimum approval threshold before merges.',
+      action: actionButton('Set approvals', () => actSetApprovals(repo.id, ownerCapId), 'repo-guide-action'),
+    });
+  }
+  if (ownerCapId && !activeAgents.length) {
+    items.push({
+      title: 'No agents assigned',
+      body: 'Grant a scoped AgentCap for open_pr, review or run_ci.',
+      action: actionButton('Grant agent', () => actGrantAgent(repo.id, ownerCapId), 'repo-guide-action'),
+    });
+  }
+  if (repo.currentSnapshot) {
+    items.push({
+      title: 'Verify this snapshot',
+      body: 'Recompute treeHash locally and compare it with the on-chain anchor.',
+      action: actionButton('Verify snapshot', () => runRepoSnapshotVerify(repo.id, $('repoSnapshotVerifyOut'), $('repoSnapshotVerifyBtn'), repo.currentSnapshot), 'repo-guide-action'),
+    });
+  }
+  if (ownerCapId && !ctx.rels.length) {
+    items.push({
+      title: 'No release published',
+      body: 'Publish a release from the current snapshot to expose the provenance chain.',
+      action: actionButton('Publish release', () => actPublishRelease(repo.id, ownerCapId, repo.currentSnapshot), 'repo-guide-action'),
+    });
+  }
+  if (!items.length && (ctx.issues.length || ctx.bounties.length)) {
+    items.push({
+      title: 'Work is active',
+      body: `${ctx.issues.length} issue(s) and ${ctx.bounties.length} bounty(ies) are attached to this repo.`,
+      action: '',
+    });
+  }
+  if (!items.length && (ownerCapId || agentCap)) {
+    items.push({
+      title: 'Repo is in a good state',
+      body: 'Push a new snapshot, open a PR or review current work from this page.',
+      action: '',
+    });
+  }
+  return '<div class="repo-guide">' + items.slice(0, 4).map((item) =>
+    '<div class="repo-guide-card">' +
+      '<div class="repo-guide-title">' + escapeHtml(item.title) + '</div>' +
+      '<div class="repo-guide-body">' + escapeHtml(item.body) + '</div>' +
+      (item.action ? '<div class="repo-guide-foot">' + item.action + '</div>' : '') +
+    '</div>'
+  ).join('') + '</div>';
+}
+
+function renderRepoActionBar(repo) {
+  if (!STATE.wallet) return '';
+  const ownerCapId = ownerCapFor(repo.id);
+  const agentCap = agentCapFor(repo.id);
+  const canOpenPr = !!ownerCapId || !!(agentCap && (agentCap.scopes & SCOPE_OPEN_PR) === SCOPE_OPEN_PR);
+  const buttons = [];
+  if (ownerCapId) {
+    buttons.push(actionButton('Grant agent cap', () => actGrantAgent(repo.id, ownerCapId)));
+    buttons.push(actionButton('Set approvals', () => actSetApprovals(repo.id, ownerCapId)));
+    buttons.push(actionButton('Publish release', () => actPublishRelease(repo.id, ownerCapId, repo.currentSnapshot)));
+    buttons.push(actionButton('Transfer ownership', () => actTransferOwnership(ownerCapId)));
+  }
+  if (canOpenPr) buttons.push(actionButton('Open PR', () => actOpenPr(repo.id, ownerCapId, agentCap?.capId || null)));
+  if (!buttons.length) return '';
+  return '<div class="repo-actions-panel">' +
+    '<div class="repo-actions-head"><div><div class="repo-actions-title">Owner / agent actions</div>' +
+    '<div class="repo-actions-note">Web actions for this repo. CLI remains available below as a fallback.</div></div></div>' +
+    '<div class="repo-actions-row">' + buttons.join('') + '</div></div>';
+}
+
+function renderRepoAgentCard(repoId, cap) {
+  const rep = STATE.reps.find((x) => x.agent === cap.agent);
+  const summary = agentSummary(cap.agent);
+  const status = capStatusInfo(cap);
+  const scopes = scopeChips(cap.scopes);
+  const relPct = Math.round(summary.reliability * 100);
+  const ownerCapId = ownerCapFor(repoId);
+  const expires = cap.expires
+    ? 'epoch ' + cap.expires + (STATE.epoch != null && !status.expired ? ' · ' + Math.max(0, cap.expires - STATE.epoch) + ' left' : '')
+    : 'never';
+  return '<div class="agent-card repo-agent-card">' +
+    '<div class="agent-card-head">' +
+      '<div class="rep-av" style="width:44px;height:44px;font-size:13px">' + (cap.agent ? cap.agent.slice(2, 4).toUpperCase() : '··') + '</div>' +
+      '<button class="agent-link" data-agent="' + cap.agent + '">' + escapeHtml(nameOrShort(cap.agent)) + '</button>' +
+      (STATE.wallet?.address === cap.agent ? '<span class="you-tag">you</span>' : '') +
+      (rep ? '<span class="tier-badge ' + scoreTier(rep.score).cls + '" style="margin-left:auto">' + scoreTier(rep.score).tier + '</span>' : '<span style="margin-left:auto"></span>') +
+      (rep ? '<span class="score-badge">' + rep.score + '</span>' : '') +
+    '</div>' +
+    '<div class="agent-market-row">' +
+      '<span class="market-pill">scope ' + escapeHtml(scopes.join(', ') || 'none') + '</span>' +
+      '<span class="market-pill">SLA ' + relPct + '%</span>' +
+      '<span class="market-pill">repo work ' + summary.repoIds.size + '</span>' +
+      '<span class="cap-status ' + status.cls + '">' + status.label + '</span>' +
+    '</div>' +
+    '<div class="delegation">' +
+      '<div class="deleg-line"><span class="mono">AgentCap</span><span class="deleg-arrow">→</span>' +
+      '<a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(cap.capId) + '">' + short(cap.capId) + '</a></div>' +
+      '<div class="deleg-scopes">scope: ' + (scopes.map((x) => '<span class="scope-chip">' + escapeHtml(x) + '</span>').join('') || '<span class="scope-chip none">none</span>') +
+      ' · expiry ' + escapeHtml(expires) + '</div>' +
+      '<div class="deleg-note">Scoped capabilities are repo-local and cannot merge or publish.</div>' +
+    '</div>' +
+    '<div class="agent-foot">' +
+      actionButton('Profile', () => showAgentDetail(cap.agent)) +
+      (ownerCapId && !cap.revoked ? actionButton('Revoke', () => actRevokeAgent(repoId, ownerCapId, cap.capId), 'cmd-action repo-action-danger') : '') +
+    '</div>' +
+  '</div>';
+}
+
+function repoIssueCardHtml(i) {
+  return '<div class="pr-card">' +
+    '<div class="pr-card-top"><span class="pill ' + issueStatusLabel(i.status) + '">' + escapeHtml(issueStatusLabel(i.status)) + '</span>' +
+    '<a class="link mono" style="margin-left:auto" target="_blank" rel="noreferrer" href="' + explorerObject(i.id) + '">' + short(i.id) + '</a></div>' +
+    '<div class="pr-title">' + escapeHtml(i.title || '(untitled issue)') + '</div>' +
+    '<div class="repo-meta"><div><span class="k">Author</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(i.author) + '">' + escapeHtml(nameOrShort(i.author)) + '</a></div>' +
+    '<div><span class="k">Comments</span><span class="mono">' + (i.commentCount || 0) + '</span></div></div>' +
+  '</div>';
+}
+
+function repoBountyCardHtml(b) {
+  return '<div class="pr-card">' +
+    '<div class="pr-card-top"><span class="pill ' + bountyStatusLabel(b.status) + '">' + escapeHtml(bountyStatusLabel(b.status)) + '</span>' +
+    '<a class="link mono" style="margin-left:auto" target="_blank" rel="noreferrer" href="' + explorerObject(b.id) + '">' + short(b.id) + '</a></div>' +
+    '<div class="pr-title">' + escapeHtml(b.title || '(untitled bounty)') + '</div>' +
+    '<div class="repo-meta"><div><span class="k">Amount</span><span class="mono">' + suiAmount(b.amount) + ' SUI</span></div>' +
+    '<div><span class="k">Min score</span><span class="mono">' + (b.minScore || 0) + '</span></div>' +
+    '<div><span class="k">Claimant</span><span class="mono">' + escapeHtml(b.claimant ? nameOrShort(b.claimant) : '—') + '</span></div></div>' +
+  '</div>';
+}
+
 async function showRepoDetail(repoId) {
   backTo = 'repos';
   const r = STATE.repos.find((x) => x.id === repoId);
   if (!r) return;
+  const prs = STATE.prs.filter((p) => p.repoId === repoId);
+  const rels = STATE.releases.filter((x) => x.repoId === repoId);
+  const issues = STATE.issues.filter((x) => x.repoId === repoId);
+  const bounties = STATE.bounties.filter((x) => x.repoId === repoId);
+  const repoCaps = capsForRepo(repoId);
+  const ownerCapId = ownerCapFor(r.id);
+  const agentCap = agentCapFor(r.id);
+  const canOpenPr = !!ownerCapId || !!(agentCap && (agentCap.scopes & SCOPE_OPEN_PR) === SCOPE_OPEN_PR);
   const host = $('detailBody');
   showView('detail');
   $('detailTitle').textContent = r.name;
@@ -2316,6 +2589,8 @@ async function showRepoDetail(repoId) {
       '<div><span class="k">Object</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(r.id) + '">' + short(r.id) + '</a></div>' +
       '<div><span class="k">Snapshot</span><a class="link mono" target="_blank" rel="noreferrer" href="' + blobUrl(r.currentSnapshot) + '">' + short(r.currentSnapshot) + '</a></div>' +
     '</div>' +
+    renderRepoGuidance(r, { prs, rels, issues, bounties, repoCaps }) +
+    renderRepoActionBar(r) +
     cmdPanel('Update this repo (push a new snapshot)',
       'npm run forge -- push-snapshot --dir <path-to-code>',
       'Snapshots are built and uploaded by the CLI (local keystore).') +
@@ -2323,18 +2598,58 @@ async function showRepoDetail(repoId) {
       'npm run forge -- set-approvals --n 1',
       'Sets the on-chain min_approvals gate. Current: ' + (r.minApprovals || 0) + '.',
       ownerCapFor(r.id) ? { label: 'Set min approvals', fn: () => actSetApprovals(r.id, ownerCapFor(r.id)) } : null) +
+    (canOpenPr ? cmdPanel('Open a pull request',
+      'npm run forge -- pr --repo ' + r.id + ' --head <manifest-blob> --title "<title>"',
+      'Open a PR from a prepared head snapshot. Owner or agent with open_pr scope.',
+      { label: 'Open PR', fn: () => actOpenPr(r.id, ownerCapId, agentCap?.capId || null) }) : '') +
+    (ownerCapId ? cmdPanel('Publish a release (owner)',
+      'npm run forge -- release --repo ' + r.id + ' --tag <v> --artifact <blob> --report <blob>',
+      'Publish a provenance chain for this repo. Use merged PR id for the v2 hard-link path.',
+      { label: 'Publish release', fn: () => actPublishRelease(r.id, ownerCapId, r.currentSnapshot) }) : '') +
+    (ownerCapId ? cmdPanel('Rotate repository ownership',
+      'npm run forge -- transfer-owner --repo ' + r.id + ' --to <address>',
+      'Transfers the RepoOwnerCap to another wallet or multisig. Useful for key rotation.',
+      { label: 'Transfer ownership', fn: () => actTransferOwnership(ownerCapId) }) : '') +
+    '<h3 class="detail-h3">Snapshot proof</h3>' +
+    '<div class="cmd-panel repo-proof-panel">' +
+      '<div class="cmd-head"><span class="cmd-title">Verify whole snapshot</span>' +
+      actionButton('Verify whole snapshot', () => runRepoSnapshotVerify(r.id, $('repoSnapshotVerifyOut'), $('repoSnapshotVerifyBtn'), r.currentSnapshot), 'cmd-action') +
+      '</div>' +
+      '<div class="cmd-note">Recompute the current snapshot treeHash locally and compare it to the manifest blob anchored on-chain by this repo ref.</div>' +
+      '<div id="repoSnapshotVerifyOut"><div class="empty-state">Run the repo-level proof check from here.</div></div>' +
+    '</div>' +
+    '<h3 class="detail-h3">Agents <span class="mono">(' + repoCaps.length + ')</span></h3>' +
+    '<div class="repo-inline-actions">' +
+      (ownerCapId ? actionButton('Grant scoped cap', () => actGrantAgent(r.id, ownerCapId), 'cmd-action') : '') +
+    '</div>' +
+    '<div class="card-grid" id="repoAgents"></div>' +
+    '<h3 class="detail-h3">Issues <span class="mono">(' + issues.length + ')</span></h3>' +
+    '<div class="repo-inline-actions">' +
+      (STATE.wallet ? actionButton('Open issue', () => actOpenIssue(r.id), 'cmd-action') : '') +
+    '</div>' +
+    '<div class="card-grid" id="repoIssues"></div>' +
+    '<h3 class="detail-h3">Bounties <span class="mono">(' + bounties.length + ')</span></h3>' +
+    '<div class="repo-inline-actions">' +
+      (STATE.wallet ? actionButton('Post bounty', () => actPostBounty(r.id), 'cmd-action') : '') +
+    '</div>' +
+    '<div class="card-grid" id="repoBounties"></div>' +
     '<h3 class="detail-h3">Files <span class="mono" id="treeCount"></span></h3>' +
     '<div class="tree" id="fileTree"><div class="empty-state">Loading file tree…</div></div>' +
     '<div class="file-view" id="fileView" style="display:none"></div>' +
     '<h3 class="detail-h3">Pull Requests</h3><div class="card-grid" id="repoPrs"></div>' +
     '<h3 class="detail-h3">Releases</h3><div id="repoReleases"></div>';
 
-  // PRs / releases for this repo
-  const prs = STATE.prs.filter((p) => p.repoId === repoId);
+  $('repoAgents').innerHTML = repoCaps.length ? repoCaps.map((cap) => renderRepoAgentCard(repoId, cap)).join('')
+    : '<div class="empty-state">No AgentCaps granted on this repo yet.</div>';
+  $('repoAgents').querySelectorAll('.agent-link').forEach((b) =>
+    b.addEventListener('click', () => showAgentDetail(b.dataset.agent)));
+  $('repoIssues').innerHTML = issues.length ? issues.map((i) => repoIssueCardHtml(i)).join('')
+    : '<div class="empty-state">No issues for this repo.</div>';
+  $('repoBounties').innerHTML = bounties.length ? bounties.map((b) => repoBountyCardHtml(b)).join('')
+    : '<div class="empty-state">No bounties for this repo.</div>';
   $('repoPrs').innerHTML = prs.length ? prs.map((p) => prCardHtml(p)).join('')
     : '<div class="empty-state">No PRs for this repo.</div>';
   wirePrCards($('repoPrs'));
-  const rels = STATE.releases.filter((x) => x.repoId === repoId);
   $('repoReleases').innerHTML = rels.length ? rels.map((x) => releaseRowHtml(x)).join('')
     : '<div class="empty-state">No releases for this repo.</div>';
   wireReleaseRows($('repoReleases'));
