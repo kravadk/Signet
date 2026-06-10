@@ -837,7 +837,7 @@ export function renderGallery() {
   grid.innerHTML = apps.map((a) => `
     <div class="pg-card" data-app="${a.id}">
       <div class="pg-card-head">
-        <span class="pg-card-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
+        <span class="pg-card-name pg-card-name-link" data-act="open" data-app="${a.id}" title="Open ${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
         <span class="pg-cat">${escapeHtml(a.category)}</span>
       </div>
       <div class="pg-prompt" title="${escapeHtml(a.prompt)}">${escapeHtml(a.prompt)}</div>
@@ -1320,7 +1320,7 @@ async function showBuilderProfile(addr) {
       const handle = pg.handles.get(addr);
       m.innerHTML = `
         <div class="pg-profile-head">
-          <div class="pg-profile-name">${escapeHtml(handle ? '@' + handle : nameOrShort(addr))}</div>
+          <a class="pg-profile-name" href="${explorerAddress(addr)}" target="_blank" rel="noreferrer" style="text-decoration:none">${escapeHtml(handle ? '@' + handle : nameOrShort(addr))}</a>
           <a class="link mono" href="${explorerAddress(addr)}" target="_blank" rel="noreferrer">${short(addr)} ↗</a>
         </div>
         ${isMe && CFG.nameRegistry ? `
