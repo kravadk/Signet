@@ -801,8 +801,8 @@ SDK/CLI surfaces (`forge gov-propose|gov-vote|gov-execute`, `forge sub-create|su
 
 ## Project status
 
-- ✅ **Contracts** live on **testnet at v13** (10 modules incl. `governance` + `subscription`) and on **mainnet at v12** (8 modules); incl. paid-fork + Seal private apps + payment links.
-- ✅ **`governance`** (reputation-weighted Treasury voting + timelock) and **`subscription`** (recurring + streaming SUI payments) are **live on testnet** (v13, `sui move test` **80/80**, package `0xb84477…`); the mainnet v13 upgrade is the same gated step — see [Deploy the v13 upgrade](#deploy-the-v13-upgrade).
+- ✅ **Contracts** live on **testnet and mainnet**, both at the v13 module set (10 modules incl. `governance` + `subscription`); incl. paid-fork + Seal private apps + payment links.
+- ✅ **`governance`** (reputation-weighted Treasury voting + timelock) and **`subscription`** (recurring + streaming SUI payments) are **live on both networks** (`sui move test` **80/80**; testnet pkg `0xb84477…`, mainnet pkg `0x53a087…`). Note: the mainnet UpgradeCap is still held by the testnet-flagged deployer key — rotate it to a clean key / multisig before treating mainnet as production (see [SECURITY.md](SECURITY.md)).
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (22 tools) + CLI (14 commands) + typed SDK clients.

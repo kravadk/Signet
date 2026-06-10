@@ -64,12 +64,13 @@ const DEPLOYMENTS = {
   },
   mainnet: {
     packageId: '0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54',
+    writePackageId: '0x53a087afded911fbfb39c9c42cc9d5ee7dfa5d5335bfdffcb346f7e2861dfd7d',
     mvrName: '@signet/forge',
     mvrStatus: 'configured; raw package id active',
     forgeRegistry: '0xc33128b32c015cf010116499d87bebb9899aec410b790902bf6208b992fa2071',
     publishTx: '7Um2fePJjJnaLXwbiQ8Jbv3z4nBp5TApb4MQFm7Ur7Ne',
-    toolchainVersion: '1.73.0',
-    playgroundPackageId: '0x60e6933e4b92c4deb2f9afb37c143581d1bd589b2f2a32d76c9c2189a287b36a',
+    toolchainVersion: '1.73.1',
+    playgroundPackageId: '0x53a087afded911fbfb39c9c42cc9d5ee7dfa5d5335bfdffcb346f7e2861dfd7d',
     // On mainnet the playground module first appeared at 0x6838f792, so events
     // are read under that original id (not the latest moderation upgrade).
     playgroundEventPkg: '0x6838f7929bd93439049fa910bc696a6f73ee2c7a44b3ab261d032de47877cb3f',

@@ -171,10 +171,14 @@ opt-in `governance` module *does* add reputation-weighted voting + a timelock, b
 
 ## Known risks & mitigations
 
-1. **Compromised deployer key (testnet).** The current testnet deployer/`UpgradeCap` holder key is
-   considered compromised and is used **only on testnet**. **Before any mainnet deployment the key
-   must be rotated** and the `UpgradeCap` transferred to a fresh key (ideally multisig). Mainnet
-   deploy/upgrade is a **manual, gated** step — never automated.
+1. **Compromised deployer key (testnet + mainnet).** The deployer key `0x9de8…dea2` holds **both**
+   the testnet `UpgradeCap` (`0x699b…`) and the mainnet `UpgradeCap` (`0xdfb585…`) and is considered
+   compromised. It has been used for manual, gated package upgrades on both networks (incl. the v13
+   upgrade adding `governance` + `subscription`). **The outstanding hardening step is to transfer
+   both `UpgradeCap`s (and the admin/registry objects) to a fresh key or a k-of-n multisig**
+   (`forge transfer-owner` / `sui client transfer` of the cap) — until then, anyone holding the
+   leaked key can upgrade or take over the packages. **Mainnet must not be treated as production
+   until the cap is rotated.** All deploy/upgrade actions remain manual and gated — never automated.
 2. **CI release signing.** Releases are currently signed with a project key. A keyless / remote-signer
    model (cf. zktx-io GitSigner, Sigstore) is the intended hardening so no private key sits in CI.
 3. **gRPC read transport.** The web read adapter attempts a real `@mysten/sui` gRPC read and falls
