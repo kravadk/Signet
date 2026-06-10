@@ -903,7 +903,7 @@ async function loadData() {
   try {
     // withTimeout turns a hung fullnode into the same empty-state fallback as a
     // rejection, so a slow RPC can never leave a view spinning forever.
-    const [repos, prs, releases, reps, issues, bounties, payments, activity, agentCaps, reviewEvents, vouchEvents, bountyEvents] = await Promise.all([
+    const [repos, prs, releases, reps, issues, bounties, payments, activity, agentCaps, reviewEvents, vouchEvents, bountyEvents, governance, subscriptions, streams] = await Promise.all([
       withTimeout(listRepos(), 15000, 'repos'),
       withTimeout(listAllPullRequests(), 15000, 'prs'),
       withTimeout(listAllReleases(), 15000, 'releases'),
@@ -916,6 +916,9 @@ async function loadData() {
       withTimeout(listReviewEvents(), 15000, 'reviews'),
       withTimeout(listVouchEvents(), 15000, 'vouches'),
       withTimeout(listBountyLifecycleEvents(), 15000, 'bounty lifecycle'),
+      withTimeout(listAllGovernance(), 15000, 'governance'),
+      withTimeout(listAllSubscriptions(), 15000, 'subscriptions'),
+      withTimeout(listAllStreams(), 15000, 'streams'),
     ]);
 
     // Current epoch (best-effort) — lets the agents view flag expired / soon-to-expire
@@ -965,6 +968,8 @@ async function loadData() {
     setNavCount('navIssueCount', issues.length);
     setNavCount('navBountyCount', bounties.length);
     setNavCount('navPaymentCount', payments.length);
+    setNavCount('navGovernanceCount', governance.length);
+    setNavCount('navSubscriptionsCount', subscriptions.length + streams.length);
 
     // cache for the other views + render them
     STATE.repos = repos;
@@ -974,6 +979,9 @@ async function loadData() {
     STATE.issues = issues;
     STATE.bounties = bounties;
     STATE.payments = payments;
+    STATE.governance = governance;
+    STATE.subscriptions = subscriptions;
+    STATE.streams = streams;
     STATE.activity = activity;
     STATE.repoNameById = repoNameById;
     STATE.agentCaps = agentCaps;
@@ -996,6 +1004,8 @@ async function loadData() {
     renderIssuesView();
     renderBountiesView();
     renderPaymentsView();
+    renderGovernanceView();
+    renderSubscriptionsView();
     renderActivityView();
     renderVerifyView();
 
@@ -1163,7 +1173,7 @@ function wireAgentFilters() {
 const VIEW_TITLES = {
   dashboard: 'Dashboard', playground: 'Playground', repos: 'Repositories', prs: 'Pull Requests',
   releases: 'Releases', packages: 'Packages', agents: 'Agents', issues: 'Issues', bounties: 'Bounties',
-  payments: 'Payments',
+  payments: 'Payments', governance: 'Governance', subscriptions: 'Subscriptions',
   activity: 'Activity', verify: 'Verify', trust: 'Trust Model',
   walrus: 'Walrus Storage', mcp: 'MCP / Agents API', detail: 'Detail',
 };
@@ -1184,6 +1194,8 @@ function showView(name) {
     if (!_pgInit) { _pgInit = true; loadGallery(); }
   }
   if (target === 'payments') renderPaymentsView();
+  if (target === 'governance') renderGovernanceView();
+  if (target === 'subscriptions') renderSubscriptionsView();
 }
 
 /* ---------- Repositories view ---------- */
@@ -1877,6 +1889,340 @@ async function actCancelPayment(p) {
     arguments: [tx.object(p.id)],
   });
   await signAndRun(tx, 'Payment request cancelled');
+}
+
+/* ============================================================
+   Governance — Treasury proposals (v13 governance module)
+   ============================================================ */
+function balVal(v) { return Number((v && v.fields ? v.fields.value : v) ?? 0); }
+
+function parseProposal(x, id) {
+  if (x.amount === undefined) return null;
+  return {
+    id, proposer: x.proposer, recipient: x.recipient,
+    amount: Number(x.amount), label: x.label || '', status: Number(x.status),
+    votesFor: Number(x.votes_for ?? 0), votesAgainst: Number(x.votes_against ?? 0),
+    votingEndsMs: Number(x.voting_ends_ms ?? 0), timelockMs: Number(x.timelock_ms ?? 0),
+    createdAt: Number(x.created_at_ms ?? 0),
+  };
+}
+async function listAllGovernance() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.writePackageId || CFG.packageId}::governance::ProposalOpened` });
+  const ids = data.map((e) => e.parsedJson?.proposal_id).filter(Boolean);
+  const out = await multiGet(ids, parseProposal);
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+function govStatusLabel(s) { return ['voting', 'executed', 'rejected'][s] || 'unknown'; }
+function govPillClass(s) { return s === 1 ? 'paid' : s === 2 ? 'cancelled' : 'open'; }
+
+function renderGovernanceView() {
+  const el = $('governanceList');
+  if (!el) return;
+  const cmd = cmdPanel('Open a Treasury proposal',
+    'governance::open_proposal — anyone proposes a payout; votes weigh by builder_score; anyone executes after the timelock.',
+    null,
+    STATE.wallet ? { label: '+ New proposal', fn: actOpenProposal } : null);
+  if (!STATE.governance.length) {
+    el.innerHTML = cmd + '<div class="empty-state">No proposals yet. Open one to let the community vote on spending the protocol Treasury.</div>';
+    return;
+  }
+  const now = Date.now();
+  el.innerHTML = cmd + STATE.governance.map((p) => {
+    const votingOpen = p.status === 0 && now < p.votingEndsMs;
+    const canExec = p.status === 0 && now >= p.votingEndsMs + p.timelockMs;
+    let actions = '';
+    if (STATE.wallet && p.status === 0) {
+      const b = [];
+      if (votingOpen) {
+        b.push('<button class="btn-ghost pg-mini" data-gov="yes" data-id="' + p.id + '">Vote ✓</button>');
+        b.push('<button class="btn-ghost pg-mini" data-gov="no" data-id="' + p.id + '">Vote ✕</button>');
+      }
+      if (canExec) b.push('<button class="btn-ghost pg-mini" data-gov="exec" data-id="' + p.id + '">Execute</button>');
+      if (b.length) actions = '<div class="pg-card-actions">' + b.join('') + '</div>';
+    }
+    return '<div class="repo-card">' +
+      '<div class="pr-card-top"><span class="pill ' + govPillClass(p.status) + '">' + govStatusLabel(p.status) + '</span>' +
+        '<span class="bounty-amount mono" style="margin-left:auto">' + suiAmount(p.amount) + ' SUI</span></div>' +
+      '<div class="pr-title" title="' + escapeHtml(p.label || '(proposal)') + '">' + escapeHtml(p.label || '(proposal)') + '</div>' +
+      '<div class="repo-meta">' +
+        '<div><span class="k">Recipient</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(p.recipient) + '">' + short(p.recipient) + '</a></div>' +
+        '<div><span class="k">Votes</span><span class="mono"><b style="color:var(--ok)">' + p.votesFor + '</b> ✓ · <b>' + p.votesAgainst + '</b> ✕</span></div>' +
+        '<div><span class="k">Voting ' + (now < p.votingEndsMs ? 'ends' : 'ended') + '</span><span class="mono">' + new Date(p.votingEndsMs).toLocaleString() + '</span></div>' +
+        '<div><span class="k">Proposal</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(p.id) + '">' + short(p.id) + '</a></div>' +
+      '</div>' + actions + '</div>';
+  }).join('');
+  el.querySelectorAll('[data-gov]').forEach((btn) => btn.addEventListener('click', () => {
+    const p = STATE.governance.find((x) => x.id === btn.dataset.id);
+    if (!p) return;
+    if (btn.dataset.gov === 'yes') actVoteProposal(p, true);
+    else if (btn.dataset.gov === 'no') actVoteProposal(p, false);
+    else if (btn.dataset.gov === 'exec') actExecuteProposal(p);
+  }));
+}
+
+function actOpenProposal() {
+  if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return; }
+  openModal({
+    title: 'Open Treasury proposal',
+    bodyHtml: '<label class="field"><span>Recipient</span><input id="govRecipient" value="' + escapeHtml(STATE.wallet.address) + '"></label>' +
+      '<label class="field"><span>Label</span><input id="govLabel" value="Treasury payout"></label>' +
+      '<label class="field"><span>Amount SUI</span><input id="govAmount" type="number" min="0" step="0.001" value="0.1"></label>' +
+      '<label class="field"><span>Voting window (hours)</span><input id="govVoting" type="number" min="0" step="1" value="24"></label>' +
+      '<label class="field"><span>Timelock after voting (hours)</span><input id="govTimelock" type="number" min="0" step="1" value="1"></label>' +
+      '<button class="cmd-action" id="govOpenBtn" type="button">Sign & open</button>',
+    onMount(body) { body.querySelector('#govOpenBtn')?.addEventListener('click', submitOpenProposal); },
+  });
+}
+async function submitOpenProposal() {
+  const btn = $('govOpenBtn');
+  try {
+    if (btn?.dataset.busy === '1') return;
+    if (btn) { btn.dataset.busy = '1'; btn.disabled = true; }
+    const recipient = $('govRecipient')?.value?.trim() || '';
+    const label = $('govLabel')?.value?.trim() || 'Treasury payout';
+    const amountMist = Math.floor(Number($('govAmount')?.value || 0) * MIST);
+    const votingMs = Math.floor(Number($('govVoting')?.value || 0) * 3600000);
+    const timelockMs = Math.floor(Number($('govTimelock')?.value || 0) * 3600000);
+    if (!isValidSuiAddress(recipient) || amountMist <= 0) { toast('Enter a valid recipient and amount', { kind: 'error' }); return; }
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${CFG.writePackageId || CFG.packageId}::governance::open_proposal`,
+      arguments: [tx.object(CFG.treasury), tx.pure.address(recipient), tx.pure.u64(amountMist), tx.pure.string(label), tx.pure.u64(votingMs), tx.pure.u64(timelockMs), tx.object.clock()],
+    });
+    await signAndRunCreated(tx, 'Proposal opened', '::governance::Proposal');
+    closeModal();
+  } catch (e) {
+    toast('Open proposal failed: ' + decodeSuiError(e).message, { kind: 'error' });
+  } finally {
+    if (btn) { btn.dataset.busy = '0'; btn.disabled = false; }
+  }
+}
+async function actVoteProposal(p, approve) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CFG.writePackageId || CFG.packageId}::governance::vote`,
+    arguments: [tx.object(p.id), tx.object(CFG.builderBoard), tx.pure.bool(approve), tx.object.clock()],
+  });
+  await signAndRun(tx, approve ? 'Voted in favour' : 'Voted against');
+}
+async function actExecuteProposal(p) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CFG.writePackageId || CFG.packageId}::governance::execute`,
+    arguments: [tx.object(p.id), tx.object(CFG.treasury), tx.object.clock()],
+  });
+  await signAndRun(tx, 'Proposal executed');
+}
+
+/* ============================================================
+   Subscriptions & streams (v13 subscription module)
+   ============================================================ */
+function parseSubscription(x, id) {
+  if (x.amount_per_period === undefined) return null;
+  return {
+    id, kind: 'sub', payer: x.payer, payee: x.payee, label: x.label || '',
+    amountPerPeriod: Number(x.amount_per_period), periodMs: Number(x.period_ms ?? 0),
+    totalPeriods: Number(x.total_periods ?? 0), periodsClaimed: Number(x.periods_claimed ?? 0),
+    escrow: balVal(x.escrow), cancelled: !!x.cancelled, nextClaimAt: Number(x.next_claim_at_ms ?? 0),
+  };
+}
+async function listAllSubscriptions() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.writePackageId || CFG.packageId}::subscription::SubscriptionCreated` });
+  const ids = data.map((e) => e.parsedJson?.subscription_id).filter(Boolean);
+  return multiGet(ids, parseSubscription);
+}
+function parseStream(x, id) {
+  if (x.total === undefined) return null;
+  return {
+    id, kind: 'stream', payer: x.payer, payee: x.payee, label: x.label || '',
+    escrow: balVal(x.escrow), total: Number(x.total), claimed: Number(x.claimed ?? 0),
+    startMs: Number(x.start_ms ?? 0), durationMs: Number(x.duration_ms ?? 0), cancelled: !!x.cancelled,
+  };
+}
+async function listAllStreams() {
+  const data = await queryAllEvents({ MoveEventType: `${CFG.writePackageId || CFG.packageId}::subscription::StreamCreated` });
+  const ids = data.map((e) => e.parsedJson?.stream_id).filter(Boolean);
+  return multiGet(ids, parseStream);
+}
+
+function renderSubscriptionsView() {
+  const el = $('subscriptionsList');
+  if (!el) return;
+  const cmd = cmdPanel('Create a subscription',
+    'subscription::create_subscription — pre-fund N periods; the payee claims one period at a time; cancel refunds the rest.',
+    null,
+    STATE.wallet ? { label: '+ New subscription', fn: actCreateSubscription } : null);
+  const cmd2 = cmdPanel('Create a stream',
+    'subscription::create_stream — escrow a lump sum that vests linearly; the payee claims the vested-but-unclaimed portion any time.',
+    null,
+    STATE.wallet ? { label: '+ New stream', fn: actCreateStream } : null);
+  const subs = STATE.subscriptions || [];
+  const streams = STATE.streams || [];
+  if (!subs.length && !streams.length) {
+    el.innerHTML = cmd + cmd2 + '<div class="empty-state">No subscriptions or streams yet. Create one to pay (or get paid) over time, on-chain.</div>';
+    return;
+  }
+  const me = STATE.wallet?.address;
+  const subCards = subs.map((s) => {
+    const st = s.cancelled ? 'cancelled' : (s.periodsClaimed >= s.totalPeriods ? 'completed' : 'active');
+    const pill = s.cancelled ? 'cancelled' : (st === 'completed' ? 'paid' : 'open');
+    const due = !s.cancelled && Date.now() >= s.nextClaimAt && s.periodsClaimed < s.totalPeriods;
+    let actions = '';
+    if (STATE.wallet && !s.cancelled) {
+      const b = [];
+      if (me === s.payee && due) b.push('<button class="btn-ghost pg-mini" data-sub="claim" data-id="' + s.id + '">Claim</button>');
+      if (me === s.payer || me === s.payee) b.push('<button class="btn-ghost pg-mini" data-sub="cancel" data-id="' + s.id + '">Cancel</button>');
+      if (b.length) actions = '<div class="pg-card-actions">' + b.join('') + '</div>';
+    }
+    return '<div class="repo-card">' +
+      '<div class="pr-card-top"><span class="pill ' + pill + '">subscription · ' + st + '</span>' +
+        '<span class="bounty-amount mono" style="margin-left:auto">' + suiAmount(s.amountPerPeriod) + ' SUI / period</span></div>' +
+      '<div class="pr-title" title="' + escapeHtml(s.label || '(subscription)') + '">' + escapeHtml(s.label || '(subscription)') + '</div>' +
+      '<div class="repo-meta">' +
+        '<div><span class="k">Payee</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(s.payee) + '">' + short(s.payee) + '</a></div>' +
+        '<div><span class="k">Payer</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(s.payer) + '">' + short(s.payer) + '</a></div>' +
+        '<div><span class="k">Progress</span><span class="mono">' + s.periodsClaimed + ' / ' + s.totalPeriods + ' periods</span></div>' +
+        '<div><span class="k">' + (due ? 'Claimable now' : 'Next claim') + '</span><span class="mono">' + new Date(s.nextClaimAt).toLocaleString() + '</span></div>' +
+        '<div><span class="k">Escrow</span><span class="mono">' + suiAmount(s.escrow) + ' SUI</span></div>' +
+        '<div><span class="k">Object</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(s.id) + '">' + short(s.id) + '</a></div>' +
+      '</div>' + actions + '</div>';
+  }).join('');
+  const streamCards = streams.map((s) => {
+    const st = s.cancelled ? 'cancelled' : (s.claimed >= s.total ? 'completed' : 'active');
+    const pill = s.cancelled ? 'cancelled' : (st === 'completed' ? 'paid' : 'open');
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.min(s.durationMs, now - s.startMs));
+    const vested = s.durationMs ? Math.floor(s.total * elapsed / s.durationMs) : s.total;
+    const claimable = Math.max(0, vested - s.claimed);
+    let actions = '';
+    if (STATE.wallet && !s.cancelled) {
+      const b = [];
+      if (me === s.payee && claimable > 0) b.push('<button class="btn-ghost pg-mini" data-stream="claim" data-id="' + s.id + '">Claim</button>');
+      if (me === s.payer || me === s.payee) b.push('<button class="btn-ghost pg-mini" data-stream="cancel" data-id="' + s.id + '">Cancel</button>');
+      if (b.length) actions = '<div class="pg-card-actions">' + b.join('') + '</div>';
+    }
+    const pct = s.total ? Math.round(vested / s.total * 100) : 0;
+    return '<div class="repo-card">' +
+      '<div class="pr-card-top"><span class="pill ' + pill + '">stream · ' + st + '</span>' +
+        '<span class="bounty-amount mono" style="margin-left:auto">' + suiAmount(s.total) + ' SUI</span></div>' +
+      '<div class="pr-title" title="' + escapeHtml(s.label || '(stream)') + '">' + escapeHtml(s.label || '(stream)') + '</div>' +
+      '<div class="repo-meta">' +
+        '<div><span class="k">Payee</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(s.payee) + '">' + short(s.payee) + '</a></div>' +
+        '<div><span class="k">Payer</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerAddress(s.payer) + '">' + short(s.payer) + '</a></div>' +
+        '<div><span class="k">Vested</span><span class="mono">' + pct + '% · ' + suiAmount(s.claimed) + ' claimed</span></div>' +
+        '<div><span class="k">Claimable</span><span class="mono">' + suiAmount(claimable) + ' SUI</span></div>' +
+        '<div><span class="k">Object</span><a class="link mono" target="_blank" rel="noreferrer" href="' + explorerObject(s.id) + '">' + short(s.id) + '</a></div>' +
+      '</div>' + actions + '</div>';
+  }).join('');
+  el.innerHTML = cmd + cmd2 + subCards + streamCards;
+  el.querySelectorAll('[data-sub]').forEach((btn) => btn.addEventListener('click', () => {
+    const s = (STATE.subscriptions || []).find((x) => x.id === btn.dataset.id);
+    if (!s) return;
+    if (btn.dataset.sub === 'claim') actClaimDue(s);
+    else if (btn.dataset.sub === 'cancel') actCancelSubscription(s);
+  }));
+  el.querySelectorAll('[data-stream]').forEach((btn) => btn.addEventListener('click', () => {
+    const s = (STATE.streams || []).find((x) => x.id === btn.dataset.id);
+    if (!s) return;
+    if (btn.dataset.stream === 'claim') actClaimStream(s);
+    else if (btn.dataset.stream === 'cancel') actCancelStream(s);
+  }));
+}
+
+function actCreateSubscription() {
+  if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return; }
+  openModal({
+    title: 'Create subscription',
+    bodyHtml: '<label class="field"><span>Payee</span><input id="subPayee" value="' + escapeHtml(STATE.wallet.address) + '"></label>' +
+      '<label class="field"><span>Label</span><input id="subLabel" value="Signet subscription"></label>' +
+      '<label class="field"><span>Amount per period (SUI)</span><input id="subAmount" type="number" min="0" step="0.001" value="0.1"></label>' +
+      '<label class="field"><span>Period (hours)</span><input id="subPeriod" type="number" min="0" step="1" value="24"></label>' +
+      '<label class="field"><span>Total periods</span><input id="subPeriods" type="number" min="1" step="1" value="3"></label>' +
+      '<button class="cmd-action" id="subCreateBtn" type="button">Sign & create</button>',
+    onMount(body) { body.querySelector('#subCreateBtn')?.addEventListener('click', submitCreateSubscription); },
+  });
+}
+async function submitCreateSubscription() {
+  const btn = $('subCreateBtn');
+  try {
+    if (btn?.dataset.busy === '1') return;
+    if (btn) { btn.dataset.busy = '1'; btn.disabled = true; }
+    const payee = $('subPayee')?.value?.trim() || '';
+    const label = $('subLabel')?.value?.trim() || 'Signet subscription';
+    const amountPerPeriod = Math.floor(Number($('subAmount')?.value || 0) * MIST);
+    const periodMs = Math.floor(Number($('subPeriod')?.value || 0) * 3600000);
+    const totalPeriods = Math.floor(Number($('subPeriods')?.value || 0));
+    if (!isValidSuiAddress(payee) || amountPerPeriod <= 0 || periodMs <= 0 || totalPeriods <= 0) { toast('Check the payee, amount, period and count', { kind: 'error' }); return; }
+    const tx = new Transaction();
+    const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(amountPerPeriod * totalPeriods)]);
+    tx.moveCall({
+      target: `${CFG.writePackageId || CFG.packageId}::subscription::create_subscription`,
+      arguments: [tx.pure.address(payee), tx.pure.string(label), tx.pure.u64(amountPerPeriod), tx.pure.u64(periodMs), tx.pure.u64(totalPeriods), coin, tx.object.clock()],
+    });
+    await signAndRunCreated(tx, 'Subscription created', '::subscription::Subscription');
+    closeModal();
+  } catch (e) {
+    toast('Create subscription failed: ' + decodeSuiError(e).message, { kind: 'error' });
+  } finally {
+    if (btn) { btn.dataset.busy = '0'; btn.disabled = false; }
+  }
+}
+function actCreateStream() {
+  if (!STATE.wallet) { toast('Connect a wallet first', { kind: 'error' }); return; }
+  openModal({
+    title: 'Create stream',
+    bodyHtml: '<label class="field"><span>Payee</span><input id="strPayee" value="' + escapeHtml(STATE.wallet.address) + '"></label>' +
+      '<label class="field"><span>Label</span><input id="strLabel" value="Signet stream"></label>' +
+      '<label class="field"><span>Total amount (SUI)</span><input id="strAmount" type="number" min="0" step="0.001" value="0.3"></label>' +
+      '<label class="field"><span>Duration (hours)</span><input id="strDuration" type="number" min="0" step="1" value="24"></label>' +
+      '<button class="cmd-action" id="strCreateBtn" type="button">Sign & create</button>',
+    onMount(body) { body.querySelector('#strCreateBtn')?.addEventListener('click', submitCreateStream); },
+  });
+}
+async function submitCreateStream() {
+  const btn = $('strCreateBtn');
+  try {
+    if (btn?.dataset.busy === '1') return;
+    if (btn) { btn.dataset.busy = '1'; btn.disabled = true; }
+    const payee = $('strPayee')?.value?.trim() || '';
+    const label = $('strLabel')?.value?.trim() || 'Signet stream';
+    const totalMist = Math.floor(Number($('strAmount')?.value || 0) * MIST);
+    const durationMs = Math.floor(Number($('strDuration')?.value || 0) * 3600000);
+    if (!isValidSuiAddress(payee) || totalMist <= 0 || durationMs <= 0) { toast('Check the payee, amount and duration', { kind: 'error' }); return; }
+    const tx = new Transaction();
+    const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(totalMist)]);
+    tx.moveCall({
+      target: `${CFG.writePackageId || CFG.packageId}::subscription::create_stream`,
+      arguments: [tx.pure.address(payee), tx.pure.string(label), coin, tx.pure.u64(durationMs), tx.object.clock()],
+    });
+    await signAndRunCreated(tx, 'Stream created', '::subscription::Stream');
+    closeModal();
+  } catch (e) {
+    toast('Create stream failed: ' + decodeSuiError(e).message, { kind: 'error' });
+  } finally {
+    if (btn) { btn.dataset.busy = '0'; btn.disabled = false; }
+  }
+}
+async function actClaimDue(s) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${CFG.writePackageId || CFG.packageId}::subscription::claim_due`, arguments: [tx.object(s.id), tx.object.clock()] });
+  await signAndRun(tx, 'Claimed due periods');
+}
+async function actCancelSubscription(s) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${CFG.writePackageId || CFG.packageId}::subscription::cancel`, arguments: [tx.object(s.id)] });
+  await signAndRun(tx, 'Subscription cancelled');
+}
+async function actClaimStream(s) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${CFG.writePackageId || CFG.packageId}::subscription::claim_stream`, arguments: [tx.object(s.id), tx.object.clock()] });
+  await signAndRun(tx, 'Stream claimed');
+}
+async function actCancelStream(s) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${CFG.writePackageId || CFG.packageId}::subscription::cancel_stream`, arguments: [tx.object(s.id), tx.object.clock()] });
+  await signAndRun(tx, 'Stream cancelled');
 }
 
 /* ---------- Activity feed view ---------- */

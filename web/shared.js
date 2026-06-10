@@ -346,6 +346,7 @@ export function escapeHtml(s) {
 export const STATE = {
   loaded: false,
   repos: [], prs: [], releases: [], reps: [], issues: [], bounties: [], payments: [],
+  governance: [], subscriptions: [], streams: [],
   reviewEvents: [], vouchEvents: [], bountyEvents: { claimed: [], submitted: [], paid: [] },
   activity: { perMod: {}, total: 0, tsBuckets: new Map(), feed: [] },
   repoNameById: new Map(),

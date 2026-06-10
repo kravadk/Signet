@@ -94,7 +94,7 @@ capability pattern are the primary controls; abort codes are the enforcement poi
 - Private apps use **Seal** (`seal_approve_app_owner`/`seal_approve_app_member`) for access control;
   membership is an on-chain workspace registry.
 
-### `governance` — autonomous Treasury spending (ships in v13)
+### `governance` — autonomous Treasury spending (live on testnet in v13)
 - **No back-door spend.** `playground::pay_from_treasury` is `public(package)`, so only in-package
   governance logic can disburse treasury funds; no external caller can. The admin `withdraw_treasury`
   stays a separate owner-only path (the admin may renounce to leave governance as the sole route).
@@ -104,7 +104,7 @@ capability pattern are the primary controls; abort codes are the enforcement poi
   `QUORUM`, or against a different Treasury than the proposal's `treasury_id`. `execute` is a
   permissionless crank — anyone can settle a passed/failed proposal; there is no privileged executor.
 
-### `subscription` — recurring & streaming payments (ships in v13)
+### `subscription` — recurring & streaming payments (live on testnet in v13)
 - **Exact funding + refund:** `create_subscription` requires `funded >= amount_per_period * periods`
   and refunds overpayment to the payer (mirrors `payment`); a stream escrows its full amount up front.
 - **Time-gated, payee-only claims:** `claim_due` pays only matured periods

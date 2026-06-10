@@ -127,6 +127,22 @@
         <span class="count" id="navPaymentCount">·</span>
       </div>
 
+      <div class="nav-item" data-nav="governance">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v18"/><path d="M5 7h14"/><path d="M5 7l-2.5 5a3 3 0 0 0 5 0L5 7z"/><path d="M19 7l-2.5 5a3 3 0 0 0 5 0L19 7z"/>
+        </svg>
+        <span class="label-txt">Governance</span>
+        <span class="count" id="navGovernanceCount">·</span>
+      </div>
+
+      <div class="nav-item" data-nav="subscriptions">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+        <span class="label-txt">Subscriptions</span>
+        <span class="count" id="navSubscriptionsCount">·</span>
+      </div>
+
       <div class="nav-item" data-nav="activity">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 12h4l2 6 4-14 2 8h6"/>
@@ -554,6 +570,18 @@
      <div class="view" id="view-payments" style="display:none">
        <div class="view-head"><h1>Payment Links</h1><p>Create and fulfill Signet-native SUI payment requests. Request objects and paid/cancelled receipts are on-chain.</p></div>
        <div id="paymentsList"><div class="empty-state">Loading…</div></div>
+     </div>
+
+     <!-- ===== GOVERNANCE ===== -->
+     <div class="view" id="view-governance" style="display:none">
+       <div class="view-head"><h1>Governance</h1><p>Reputation-weighted proposals to spend the protocol Treasury — vote (weight = your builder score), then anyone can execute a passed proposal after its timelock. On-chain, no admin.</p></div>
+       <div id="governanceList"><div class="empty-state">Loading…</div></div>
+     </div>
+
+     <!-- ===== SUBSCRIPTIONS ===== -->
+     <div class="view" id="view-subscriptions" style="display:none">
+       <div class="view-head"><h1>Subscriptions &amp; Streams</h1><p>Recurring SUI payments (claim one period at a time) and linear streams (vest continuously). Escrow, claims and refunds are all on-chain.</p></div>
+       <div id="subscriptionsList"><div class="empty-state">Loading…</div></div>
      </div>
 
      <!-- ===== ACTIVITY ===== -->
