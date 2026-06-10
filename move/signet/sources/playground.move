@@ -513,6 +513,22 @@ public fun withdraw_treasury(treasury: &mut Treasury, amount: u64, ctx: &mut TxC
     event::emit(TreasuryWithdrawn { to: treasury.admin, amount });
 }
 
+/// Spend from the Treasury WITHOUT the admin gate — restricted to sibling Signet
+/// modules (e.g. `governance`) so a passed, time-locked proposal can disburse fees
+/// autonomously. The `public(package)` visibility IS the guard: no external caller
+/// can move treasury funds this way; only in-package governance logic can.
+public(package) fun pay_from_treasury(treasury: &mut Treasury, amount: u64, recipient: address, ctx: &mut TxContext) {
+    let payout = coin::from_balance(balance::split(&mut treasury.balance, amount), ctx);
+    transfer::public_transfer(payout, recipient);
+    event::emit(TreasuryWithdrawn { to: recipient, amount });
+}
+
+#[test_only]
+/// Seed a builder's reputation score directly (used as governance voting weight) in tests.
+public fun set_score_for_testing(board: &mut BuilderBoard, who: address, score: u64) {
+    profile_mut(board, who).score = score;
+}
+
 // ===== App bounties =====
 
 /// Post an app bounty, escrowing the reward. "Build an app that does X for Y SUI."

@@ -42,8 +42,8 @@ events — re-checkable by anyone, not a screenshot.
 | **On Walrus** | source snapshots, PR diffs, signed reviews, CI reports, release artifacts + manifests, app archives — content-addressed, tree-hash + Merkle |
 | **On Sui** | repos, PRs, reviews, releases, reputation, bounties, payments, apps — objects + events; every write gated by a capability |
 | **Agents** | MCP server, 22 tools; each bound to a scoped, expiring `AgentCap` — an agent can propose and review but **never** merge or release |
-| **Tests** | Move 66/66 · on-chain e2e 18/18 · Playwright 20/20 · app 17/17 · server 17/17, all reproducible |
-| **Stack** | Sui Move (8 modules) · Walrus · Seal · zkLogin · MCP · static JS SPA (no framework, no build step) |
+| **Tests** | Move 80/80 · on-chain e2e 18/18 · Playwright 20/20 · app 17/17 · server 17/17, all reproducible |
+| **Stack** | Sui Move (10 modules) · Walrus · Seal · zkLogin · MCP · static JS SPA (no framework, no build step) |
 
 **Why it's different:** an agent's work is normally unverifiable — screenshots and trust. Signet makes the whole chain **Repo → PR → Reviews/CI → Release** content-addressed on Walrus and anchored on Sui, so anyone re-derives the proof with no key and no trust in us. Permissions are capabilities, not an allow-list; reputation is `public(package)` bump-only, so scores can't be forged off-chain.
 
@@ -237,7 +237,7 @@ merge, and a published release `v0.2.0` — all on live testnet.
 ## Architecture
 
 ```
-move/signet/      Sui Move contracts (the trust layer) - 8 modules, 66 tests
+move/signet/      Sui Move contracts (the trust layer) - 10 modules, 80 tests
   sources/
     forge.move           Registry, Repository, RepoOwnerCap, AgentCap (scoped + revocable)
                          + Seal access policy (seal_approve_owner / seal_approve_agent)
@@ -253,7 +253,7 @@ move/signet/      Sui Move contracts (the trust layer) - 8 modules, 66 tests
                          · update_app (versioning) · publish_remix_v3 · AppBounty (post/award/cancel)
                          · ForkRegistry (set_fork_price / pay_to_fork) · PrivacyRegistry
                          · seal_approve_app_owner / seal_approve_app_member (Seal private apps)
-  tests/                 66 tests across forge + playground + payment
+  tests/                 80 tests across forge + playground + payment + governance + subscription
 
 app/                   TypeScript CLI + SDK + MCP server + CI worker
   src/lib/*.ts           walrus / snapshot / sui (PTBs) / forge-read / actions (verifyRelease)
@@ -326,7 +326,7 @@ Key events: `AppPublished`, `AppVisited`, `AppStarred`, `AppRemixed`, `AppTipped
 ### Contracts
 ```sh
 cd move/signet
-sui move test          # 66/66 pass
+sui move test          # 80/80 pass
 sui client upgrade     # upgrade (uses the UpgradeCap; writes Published.toml)
 ```
 
@@ -673,7 +673,7 @@ npm --prefix server run typecheck
 node --test server/salt/salt.test.mjs
 node --test server/sponsor/sponsor.test.mjs
 node --test server/portal/inliner.test.mjs
-sui move test --path move/signet              # 66/66 incl. payment escrow value-conservation invariant
+sui move test --path move/signet              # 80/80 incl. governance, subscription + payment escrow invariants
 npm run test:e2e                              # 20/20, desktop + mobile
 npm --prefix app run e2e:onchain              # 18/18 real testnet (needs a funded keystore key)
 npm run coverage                              # text + html coverage report (c8)
@@ -750,7 +750,7 @@ Measured against public Sui-ecosystem code (Magma — CLMM DeFi; zktx-io — Wal
 
 ## Tech stack
 
-- **Contracts:** Sui Move (edition 2024), 8 modules, 66 tests; Seal access policy.
+- **Contracts:** Sui Move (edition 2024), 10 modules, 80 tests; Seal access policy.
 - **Storage:** Walrus (HTTP publisher/aggregator on testnet; `@mysten/walrus` SDK for owned blobs).
 - **App layer:** TypeScript - CLI (commander), typed SDK clients, `@mysten/sui` SDK,
   MCP server (stdio), CI worker, optional SQLite indexer/gateway.
@@ -776,16 +776,38 @@ vulnerability.
 
 ---
 
+## Deploy the v13 upgrade
+
+The `governance` and `subscription` modules are **additive** (new files in `move/signet/sources/`,
+new types/events only — no existing layout changes). Putting them on-chain is a standard **package
+upgrade** — a manual, gated step run with the `UpgradeCap` (the deployer key is never automated):
+
+```sh
+sui move test --path move/signet                    # 80/80, build + tests
+sui client upgrade --upgrade-capability <UpgradeCap> --gas-budget 500000000 move/signet
+# then set latestPackageId = <new id> and latestVersion = 13 in move/signet/deployments.json
+```
+
+One-time bootstrap (Sui forbids `init` in upgrade-added modules): create a `Treasury` if you don't
+already have one (`playground::create_treasury(<admin>)`) — a `BuilderBoard` already exists since
+v6. Proposals, subscriptions and streams are standalone shared objects (no registry needed). The
+SDK/CLI surfaces (`forge gov-propose|gov-vote|gov-execute`, `forge sub-create|sub-claim|sub-cancel`,
+`forge stream-create|stream-claim|stream-cancel`) target the new version automatically via
+`writePkg()`. Mainnet is a separate, gated repeat. Old objects stay readable.
+
+---
+
 ## Project status
 
-- ✅ **Contracts** live on **testnet + mainnet** (incl. paid-fork + Seal private apps + payment links); 66/66 tests.
+- ✅ **Contracts** live on **testnet + mainnet** at v12 (forge · pull_request · release · issue · bounty · reputation · payment · playground); incl. paid-fork + Seal private apps + payment links.
+- 🆕 **`governance`** (reputation-weighted Treasury voting + timelock) and **`subscription`** (recurring + streaming SUI payments) modules are implemented and tested in the repo (`sui move test` **80/80**); they ship in the next **additive** package upgrade (v13) — see [Deploy the v13 upgrade](#deploy-the-v13-upgrade).
 - ✅ **Playground** end-to-end: build → publish (free/paid) → gallery → remix/update/renew → tip →
   bounties → handles → profile → share/viewer.
 - ✅ **Release network** + `verify` (3 surfaces) + MCP (22 tools) + CLI (14 commands) + typed SDK clients.
 - ✅ **Payment links + hosted gateway**: `PaymentRequest` Move module, QR/copy payment UI,
   paid/cancelled/expired states, `/payments` APIs, `payment.paid` webhooks and reverify anchors.
 - ✅ **Quality gates**: app tests 17/17 (incl. MCP stdio integration), server tests 17/17,
-  Move 66/66, Playwright 20/20, coverage and CI artifact uploads.
+  Move 80/80, Playwright 20/20, coverage and CI artifact uploads.
 - ✅ **Onboarding code** (LLM proxy, sponsor — E2E-tested on testnet; zkLogin + salt — salt
   unit-tested). Going live needs you to host the services + register a Google OAuth client + fund
   a sponsor wallet.

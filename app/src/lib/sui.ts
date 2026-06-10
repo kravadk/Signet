@@ -619,6 +619,125 @@ export async function cancelPaymentRequest(ctx: ForgeContext, args: { requestId:
   return sign(ctx, tx);
 }
 
+// ===== Governance: autonomous Treasury spending (proposal → vote → timelock → execute) =====
+
+export async function openProposal(
+  ctx: ForgeContext,
+  args: { treasuryId: string; recipient: string; amountMist: number; label: string; votingMs: number; timelockMs: number },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::governance::open_proposal`,
+    arguments: [
+      tx.object(args.treasuryId),
+      tx.pure.address(args.recipient),
+      tx.pure.u64(args.amountMist),
+      tx.pure.string(args.label),
+      tx.pure.u64(args.votingMs),
+      tx.pure.u64(args.timelockMs),
+      tx.object.clock(),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
+export async function voteProposal(
+  ctx: ForgeContext,
+  args: { proposalId: string; boardId: string; approve: boolean },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::governance::vote`,
+    arguments: [tx.object(args.proposalId), tx.object(args.boardId), tx.pure.bool(args.approve), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+export async function executeProposal(
+  ctx: ForgeContext,
+  args: { proposalId: string; treasuryId: string },
+) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::governance::execute`,
+    arguments: [tx.object(args.proposalId), tx.object(args.treasuryId), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+// ===== Subscriptions & streams (recurring / continuous SUI payments) =====
+
+export async function createSubscription(
+  ctx: ForgeContext,
+  args: { payee: string; label: string; amountPerPeriodMist: number; periodMs: number; totalPeriods: number },
+) {
+  const tx = new Transaction();
+  const need = args.amountPerPeriodMist * args.totalPeriods;
+  const [funding] = tx.splitCoins(tx.gas, [tx.pure.u64(need)]);
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::create_subscription`,
+    arguments: [
+      tx.pure.address(args.payee),
+      tx.pure.string(args.label),
+      tx.pure.u64(args.amountPerPeriodMist),
+      tx.pure.u64(args.periodMs),
+      tx.pure.u64(args.totalPeriods),
+      funding,
+      tx.object.clock(),
+    ],
+  });
+  return sign(ctx, tx);
+}
+
+export async function claimDue(ctx: ForgeContext, args: { subscriptionId: string }) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::claim_due`,
+    arguments: [tx.object(args.subscriptionId), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+export async function cancelSubscription(ctx: ForgeContext, args: { subscriptionId: string }) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::cancel`,
+    arguments: [tx.object(args.subscriptionId)],
+  });
+  return sign(ctx, tx);
+}
+
+export async function createStream(
+  ctx: ForgeContext,
+  args: { payee: string; label: string; totalMist: number; durationMs: number },
+) {
+  const tx = new Transaction();
+  const [funding] = tx.splitCoins(tx.gas, [tx.pure.u64(args.totalMist)]);
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::create_stream`,
+    arguments: [tx.pure.address(args.payee), tx.pure.string(args.label), funding, tx.pure.u64(args.durationMs), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+export async function claimStream(ctx: ForgeContext, args: { streamId: string }) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::claim_stream`,
+    arguments: [tx.object(args.streamId), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
+export async function cancelStream(ctx: ForgeContext, args: { streamId: string }) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${writePkg(ctx.deployment)}::subscription::cancel_stream`,
+    arguments: [tx.object(args.streamId), tx.object.clock()],
+  });
+  return sign(ctx, tx);
+}
+
 // ===== Scope bitflags (mirror of the Move constants) =====
 
 export const SCOPE_OPEN_PR = 1;

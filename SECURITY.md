@@ -94,6 +94,25 @@ capability pattern are the primary controls; abort codes are the enforcement poi
 - Private apps use **Seal** (`seal_approve_app_owner`/`seal_approve_app_member`) for access control;
   membership is an on-chain workspace registry.
 
+### `governance` — autonomous Treasury spending (ships in v13)
+- **No back-door spend.** `playground::pay_from_treasury` is `public(package)`, so only in-package
+  governance logic can disburse treasury funds; no external caller can. The admin `withdraw_treasury`
+  stays a separate owner-only path (the admin may renounce to leave governance as the sole route).
+- **Vote integrity:** one vote per address (`VecSet` of voters), weight = on-chain `builder_score`;
+  zero-score addresses cannot vote; votes only count before `voting_ends_ms`.
+- **Timelock + quorum + binding:** `execute` aborts before `voting_ends_ms + timelock_ms`, below
+  `QUORUM`, or against a different Treasury than the proposal's `treasury_id`. `execute` is a
+  permissionless crank — anyone can settle a passed/failed proposal; there is no privileged executor.
+
+### `subscription` — recurring & streaming payments (ships in v13)
+- **Exact funding + refund:** `create_subscription` requires `funded >= amount_per_period * periods`
+  and refunds overpayment to the payer (mirrors `payment`); a stream escrows its full amount up front.
+- **Time-gated, payee-only claims:** `claim_due` pays only matured periods
+  (`now >= next_claim_at_ms + k·period_ms`); `claim_stream` releases `total·elapsed/duration − claimed`
+  (u128 intermediate, capped at total).
+- **Cancellation conserves value:** cancelling a subscription refunds all unclaimed escrow to the
+  payer; cancelling a stream pays the payee everything vested-but-unclaimed and refunds the remainder.
+
 ### Upgrade model
 - **Additive upgrades only** (`v1 → v12`): new modules/functions, no breaking changes to existing
   storage or signatures. Clients resolve `latestPackageId`; old objects remain readable.
@@ -143,8 +162,10 @@ What protects an imported/created repo, and what does not:
 **Self-custody caveat:** a dApp cannot make an arbitrary user's key unhackable — each repo's
 owner is responsible for the key/multisig that holds its `RepoOwnerCap`. Signet provides the
 capability model, tamper-evidence, and the transfer/rotate path; key custody is the owner's.
-There is intentionally **no** in-contract DAO/timelock/auto-recovery (it would add audit surface
-and UX cost without proportionate benefit pre-mainnet); robustness comes from multisig custody.
+There is **no** in-contract DAO/timelock over **repo ownership or recovery** — that would add audit
+surface and UX cost without proportionate benefit; robustness there comes from multisig custody. (The
+opt-in `governance` module *does* add reputation-weighted voting + a timelock, but only over
+**Treasury spending** — an economic path — never over a repo's owner cap.)
 
 ---
 
@@ -169,7 +190,7 @@ and UX cost without proportionate benefit pre-mainnet); robustness comes from mu
 
 ## Test & verification coverage
 
-- **Move unit tests:** 66/66 passing (`sui move test --path move/signet`).
+- **Move unit tests:** 80/80 passing (`sui move test --path move/signet`) — incl. `governance` and `subscription` (ship in the v13 upgrade).
 - **TS unit tests:** 17/17 (`npm --prefix app test`) incl. snapshot tree-hash + Merkle proofs.
 - **On-chain e2e (real testnet key):** 18/18 (`app/scripts/e2e-onchain.mjs`) — full chain
   init → grant-agent → PR → review → merge → release → verify → bounty → dispute → reliability →

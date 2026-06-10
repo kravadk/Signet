@@ -40,6 +40,15 @@ import {
   openDispute,
   resolveDispute,
   cancelExpired,
+  openProposal,
+  voteProposal,
+  executeProposal,
+  createSubscription,
+  claimDue,
+  cancelSubscription,
+  createStream,
+  claimStream,
+  cancelStream,
   createdOfType,
   SCOPE_OPEN_PR,
   SCOPE_REVIEW,
@@ -667,6 +676,116 @@ program
     console.log(`proof depth: ${proof.siblings.length} sibling hash(es)`);
     console.log(ok ? `\n✓ included in release ${opts.release}` : `\n✗ NOT included — proof failed`);
     if (!ok) process.exit(2);
+  });
+
+// ===== governance (autonomous treasury) =====
+program
+  .command("gov-propose")
+  .description("Open a treasury-spend proposal")
+  .requiredOption("--treasury <id>", "Treasury object id")
+  .requiredOption("--to <address>", "recipient")
+  .requiredOption("--amount <mist>", "amount in MIST")
+  .option("--label <s>", "label", "grant")
+  .option("--voting <ms>", "voting window (ms)", "86400000")
+  .option("--timelock <ms>", "timelock after voting (ms)", "86400000")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await openProposal(ctx, { treasuryId: o.treasury, recipient: o.to, amountMist: Number(o.amount), label: o.label, votingMs: Number(o.voting), timelockMs: Number(o.timelock) });
+    const id = createdOfType(res, "::governance::Proposal")[0];
+    console.log(`✓ proposal opened\n  id: ${id}\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("gov-vote")
+  .description("Cast a reputation-weighted vote")
+  .requiredOption("--proposal <id>", "Proposal object id")
+  .requiredOption("--board <id>", "BuilderBoard object id")
+  .option("--against", "vote against (default: for)", false)
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await voteProposal(ctx, { proposalId: o.proposal, boardId: o.board, approve: !o.against });
+    console.log(`✓ vote cast (${o.against ? "against" : "for"})\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("gov-execute")
+  .description("Settle a proposal after voting + timelock (anyone can crank)")
+  .requiredOption("--proposal <id>", "Proposal object id")
+  .requiredOption("--treasury <id>", "Treasury object id")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await executeProposal(ctx, { proposalId: o.proposal, treasuryId: o.treasury });
+    console.log(`✓ proposal executed\n  tx: ${res.digest}`);
+  });
+
+// ===== subscriptions & streams =====
+program
+  .command("sub-create")
+  .description("Create a pre-funded recurring subscription")
+  .requiredOption("--to <address>", "payee")
+  .requiredOption("--amount <mist>", "amount per period (MIST)")
+  .requiredOption("--period <ms>", "period length (ms)")
+  .requiredOption("--periods <n>", "total periods")
+  .option("--label <s>", "label", "subscription")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await createSubscription(ctx, { payee: o.to, label: o.label, amountPerPeriodMist: Number(o.amount), periodMs: Number(o.period), totalPeriods: Number(o.periods) });
+    const id = createdOfType(res, "::subscription::Subscription")[0];
+    console.log(`✓ subscription created\n  id: ${id}\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("sub-claim")
+  .description("Payee claims all matured periods")
+  .requiredOption("--id <id>", "Subscription object id")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await claimDue(ctx, { subscriptionId: o.id });
+    console.log(`✓ claimed due periods\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("sub-cancel")
+  .description("Cancel a subscription; unclaimed escrow refunds to the payer")
+  .requiredOption("--id <id>", "Subscription object id")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await cancelSubscription(ctx, { subscriptionId: o.id });
+    console.log(`✓ subscription cancelled\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("stream-create")
+  .description("Create a linear payment stream")
+  .requiredOption("--to <address>", "payee")
+  .requiredOption("--total <mist>", "total amount (MIST)")
+  .requiredOption("--duration <ms>", "vesting duration (ms)")
+  .option("--label <s>", "label", "stream")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await createStream(ctx, { payee: o.to, label: o.label, totalMist: Number(o.total), durationMs: Number(o.duration) });
+    const id = createdOfType(res, "::subscription::Stream")[0];
+    console.log(`✓ stream created\n  id: ${id}\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("stream-claim")
+  .description("Payee claims the vested-but-unclaimed portion")
+  .requiredOption("--id <id>", "Stream object id")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await claimStream(ctx, { streamId: o.id });
+    console.log(`✓ claimed vested\n  tx: ${res.digest}`);
+  });
+
+program
+  .command("stream-cancel")
+  .description("Cancel a stream: vested to payee, remainder refunds to payer")
+  .requiredOption("--id <id>", "Stream object id")
+  .action(async (o: any) => {
+    const ctx = makeContext(NET);
+    const res = await cancelStream(ctx, { streamId: o.id });
+    console.log(`✓ stream cancelled\n  tx: ${res.digest}`);
   });
 
 program.parseAsync(process.argv).catch((e) => {

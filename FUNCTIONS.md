@@ -11,7 +11,7 @@ are surfaces over it; the backend services are optional accelerators.
 
 ---
 
-## 1. On-chain Move API (8 modules)
+## 1. On-chain Move API (10 modules)
 
 Listed as **actions** (entry / state-changing `public fun`) and **accessors** (read-only getters).
 Upgrades are additive; `*_v2`/`*_v3` are newer variants kept alongside originals.
@@ -54,6 +54,14 @@ Upgrades are additive; `*_v2`/`*_v3` are newer variants kept alongside originals
 - **Privacy/teams (Seal):** `set_private` · `invite_workspace_member` · `revoke_workspace_member` · `is_workspace_member` · `create_privacy_registry` · `create_workspace_registry` · `create_flag_registry` · `create_fork_registry` · `create_name_registry` · `create_builder_board` · `create_registry`
 - **Handles:** `claim_name`
 - **Accessors:** `builder` · `builder_apps` · `builder_remixes` · `builder_score` · `stars` · `visits` · `tips_total` · `flag_count` · `is_hidden` · `is_private` · `fork_price` · `parent` · `tree_hash` · `release_name` · `name_owner` · `name_of_owner` · `bounty_open|poster|reward|winner` · `treasury_admin` · `treasury_balance`
+
+### `governance` — autonomous Treasury spending (v13, in repo)
+- `open_proposal(treasury, recipient, amount, label, voting_ms, timelock_ms, clock)` · `vote(proposal, board, approve, clock)` (weight = `builder_score`, one/address) · `execute(proposal, treasury, clock)` (permissionless crank after voting + timelock; disburses via package-only `playground::pay_from_treasury`)
+- **Accessors:** `proposal_status` · `proposal_votes_for` · `proposal_votes_against` · `proposal_amount` · `proposal_recipient`
+
+### `subscription` — recurring & streaming payments (v13, in repo)
+- **Recurring:** `create_subscription(payee, label, amount_per_period, period_ms, total_periods, funding, clock)` · `claim_due(sub, clock)` (payee; matured periods) · `cancel(sub)` (refund unclaimed to payer)
+- **Streaming:** `create_stream(payee, label, funding, duration_ms, clock)` · `claim_stream(stream, clock)` (pro-rata vested) · `cancel_stream(stream, clock)`
 
 > `init_for_testing` (forge, playground) is `#[test_only]`.
 
