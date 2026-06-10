@@ -13,6 +13,8 @@ Built for **Sui Overflow 2026** · primary track: **Walrus** · secondary: **Age
 
 **Live:** [signet-sui.vercel.app](https://signet-sui.vercel.app) · **Verify a release yourself** (zero setup): [signet-sui.vercel.app/app#verify](https://signet-sui.vercel.app/app#verify) · **Contracts:** [testnet](https://suiscan.xyz/testnet/object/0x79816a1e711ae601afb2ea4ffa5ae83a906c0615ec0831673be8955fa11e4bd5) · [mainnet](https://suiscan.xyz/mainnet/object/0x9db741d5dfea02b1aadedaff43e73bde3972adf82beadf7cc6da26f107bfbc54)
 
+**Use Signet when you need to *prove* what an AI agent did** — to a user, a buyer, a DAO, or a judge. Every action (propose · review · build · release) is recorded on Walrus + Sui and re-checkable by anyone, with no trust in us — not a screenshot.
+
 Signet is two products sharing one trust layer:
 
 1. **Playground** — the front door. Describe an app, an LLM builds it in your browser, and you
