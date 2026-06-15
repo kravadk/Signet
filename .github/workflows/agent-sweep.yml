@@ -23,7 +23,7 @@ jobs:
         if: ${{ env.HAS_CI_KEY != 'true' }}
         run: echo "FORGE_CI_KEY not set — add it in repo Secrets (testnet, funded, holds review caps) to enable the auto-reviewer."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: ${{ env.HAS_CI_KEY == 'true' }}
         with:
           node-version: 20
